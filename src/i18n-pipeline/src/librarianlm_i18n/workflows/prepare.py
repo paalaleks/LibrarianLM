@@ -11,10 +11,10 @@ from librarianlm_i18n.kernel.contracts import (
     OperationalOutcome, PreparePackage, PreparePolicy, PrepareResult,
     PreparationFinding, PreparationFindings, PreparationOutcome, ProjectionMap,
     ProjectionOwnership, SignatureRecord, StatusValue, StatusVector, UnitManifest,
-    UnitRecord,
+    UnitRecord, InlineBindingMap, ProtectedBlockSegments,
 )
 from librarianlm_i18n.kernel.errors import ActionableError, KernelValidationError, Retryability, actionable_error
-from librarianlm_i18n.kernel.identity import derive_typed_id, is_sha256_digest, sha256_digest
+from librarianlm_i18n.kernel.identity import derive_typed_id, is_sha256_digest, sha256_digest, source_text_digest
 from librarianlm_i18n.kernel.lifecycle import UnitLifecycleState
 from librarianlm_i18n.ports.artifact_store import ArtifactStore
 from librarianlm_i18n.ports.html_document import HtmlDocument, SelectedSourceSlot
@@ -59,6 +59,7 @@ class PrepareWorkflow:
             policy_digest = self._put(policy)
             terminology, style = self._sheets(sheets)
             terminology_digest, style_digest = self._put(terminology), self._put(style)
+            protected_artifacts: tuple[InlineBindingMap | ProtectedBlockSegments, ...] = ()
             if not self._has_blocking_findings(policy, findings):
                 selected = self._document.select(source_package)
                 if selected.error is not None:
@@ -66,12 +67,13 @@ class PrepareWorkflow:
                     slots: tuple[SelectedSourceSlot, ...] = ()
                 else:
                     slots = selected.slots
-                    manifest, selection_findings = self._derive_manifest(source_package, run_snapshot_digest, slots, prior_manifest)
+                    manifest, selection_findings, protected_artifacts = self._derive_manifest(source_package, run_snapshot_digest, slots, prior_manifest)
                     findings.extend(selection_findings)
             else:
                 slots = ()
             if self._has_blocking_findings(policy, findings):
                 return self._blocked(run_id, findings, attempt, attempt_ceiling)
+            manifest = self._persist_protected_artifacts(manifest, protected_artifacts)
             self._validate_sheet_scopes((terminology, style), manifest)
             findings_object = PreparationFindings(findings=tuple(findings))
             findings_digest = self._put(findings_object)
@@ -119,10 +121,11 @@ class PrepareWorkflow:
             selected = self._document.select(source)
             if selected.error is not None:
                 return ConfirmationResult(error=selected.error)
-            rebuilt_manifest, selection_findings = self._derive_manifest(source, package.run_snapshot_digest, selected.slots, None)
+            rebuilt_manifest, selection_findings, protected_artifacts = self._derive_manifest(source, package.run_snapshot_digest, selected.slots, None)
             findings.extend(selection_findings)
             if self._has_blocking_findings(policy, findings):
                 return ConfirmationResult(error=self._error("package-findings-block-signing", "prepare-package", "blocking findings present"))
+            rebuilt_manifest = self._persist_protected_artifacts(rebuilt_manifest, protected_artifacts)
             self._validate_sheet_scopes((terminology, style), rebuilt_manifest)
             rebuilt_findings = PreparationFindings(findings=tuple(findings))
             rebuilt_package = PreparePackage(
@@ -199,19 +202,32 @@ class PrepareWorkflow:
             raise KernelValidationError(PrepareWorkflow._error("editorial-sheet-unconfirmed", "editorial-sheets", "all sheets must be confirmed"))
         return by_kind[EditorialSheetKind.TERMINOLOGY], by_kind[EditorialSheetKind.STYLE]
 
-    def _derive_manifest(self, source: CanonicalSourcePackage, run_snapshot_digest: str, slots: tuple[SelectedSourceSlot, ...], prior_manifest: UnitManifest | None) -> tuple[UnitManifest, tuple[PreparationFinding, ...]]:
+    def _derive_manifest(self, source: CanonicalSourcePackage, run_snapshot_digest: str, slots: tuple[SelectedSourceSlot, ...], prior_manifest: UnitManifest | None) -> tuple[UnitManifest, tuple[PreparationFinding, ...], tuple[InlineBindingMap | ProtectedBlockSegments, ...]]:
         records: list[UnitRecord] = []
+        protected_artifacts: list[InlineBindingMap | ProtectedBlockSegments] = []
         for ordinal, slot in enumerate(slots):
             unit_id = derive_typed_id("source-unit", {
                 "source_html_digest": source.source_html_digest, "location": slot.location.model_dump(mode="json"),
                 "segmentation_profile": {"id": source.segmentation_profile.profile_id, "version": source.segmentation_profile.profile_version},
                 "ordinal": ordinal,
             })
+            source_digest = slot.text_digest
+            binding_map_digest = None
+            segments_digest = None
+            if slot.protected_block:
+                protected = self._document.protected_block(source, slot, unit_id)
+                if protected.error is not None:
+                    raise KernelValidationError(protected.error)
+                source_digest = source_text_digest(protected.source_text)
+                binding_map_digest = protected.binding_map.map_digest
+                segments_digest = protected.segments.segments_digest
+                protected_artifacts.extend((protected.binding_map, protected.segments))
             records.append(UnitRecord(
                 source_unit_id=unit_id, ordinal=ordinal, locator=slot.locator, source_digest=source.source_html_digest,
                 content_class=slot.content_class, eligibility=slot.eligibility, eligibility_reason=slot.eligibility_reason,
                 lifecycle_state=UnitLifecycleState.PREPARED,
-                structural_location=slot.location, structural_fingerprint=slot.structural_fingerprint, source_text_digest=slot.text_digest,
+                structural_location=slot.location, structural_fingerprint=slot.structural_fingerprint, source_text_digest=source_digest,
+                inline_binding_map_digest=binding_map_digest, protected_segments_digest=segments_digest,
             ))
         self._assert_prior_integrity(source, records, prior_manifest)
         by_location = {record.structural_location: record for record in records}
@@ -220,10 +236,21 @@ class PrepareWorkflow:
         for declared in source.projection_profile.projections:
             members = tuple(by_location.get(location) for location in declared.member_locations)
             if any(member is None for member in members):
-                return self._blocked_manifest(source, run_snapshot_digest, records, f"declared projection {declared.projection_key!r} has missing or blank members")
-            typed_members = tuple(member for member in members if member is not None)
+                manifest, findings = self._blocked_manifest(source, run_snapshot_digest, records, f"declared projection {declared.projection_key!r} has missing or blank members")
+                return manifest, findings, tuple(protected_artifacts)
+            typed_members = tuple(sorted((member for member in members if member is not None), key=lambda member: member.ordinal))
             if len({member.eligibility for member in typed_members}) != 1 or len({member.content_class for member in typed_members}) != 1:
-                return self._blocked_manifest(source, run_snapshot_digest, records, f"declared projection {declared.projection_key!r} has incompatible members")
+                manifest, findings = self._blocked_manifest(source, run_snapshot_digest, records, f"declared projection {declared.projection_key!r} has incompatible members")
+                return manifest, findings, tuple(protected_artifacts)
+            if any(member.inline_binding_map_digest is not None for member in typed_members):
+                maps = {artifact.source_unit_id: artifact for artifact in protected_artifacts if isinstance(artifact, InlineBindingMap)}
+                def topology(binding: InlineBindingMap) -> tuple[tuple[str, str, int | None], ...]:
+                    positions = {entry.token_id: index for index, entry in enumerate(binding.entries)}
+                    return tuple((entry.kind, entry.source_node, positions.get(entry.pair_id)) for entry in binding.entries)
+                reference_topology = topology(maps[typed_members[0].source_unit_id])
+                if any(member.inline_binding_map_digest is None or topology(maps[member.source_unit_id]) != reference_topology for member in typed_members):
+                    manifest, findings = self._blocked_manifest(source, run_snapshot_digest, records, f"declared projection {declared.projection_key!r} has non-isomorphic protected members")
+                    return manifest, findings, tuple(protected_artifacts)
             group_id = derive_typed_id("projection-group", {"profile": source.projection_profile.model_dump(mode="json"), "key": declared.projection_key, "members": tuple(location.model_dump(mode="json") for location in declared.member_locations)})
             canonical = min(typed_members, key=lambda record: record.ordinal)
             groups.append(ProjectionMap(group_id=group_id, canonical_source_unit_id=canonical.source_unit_id, member_locators=tuple(member.locator for member in typed_members), ownership=ProjectionOwnership.BOOK, cardinality=len(typed_members), transformation_rule=declared.transformation_rule))
@@ -236,11 +263,26 @@ class PrepareWorkflow:
         if not any(record.eligibility is Eligibility.REQUIRED for record in units):
             findings.append(self._finding("empty-required-inventory", "inventory", "no required source units were selected"))
         manifest = UnitManifest(source_package_digest=sha256_digest(canonical_bytes(source)), run_snapshot_digest=run_snapshot_digest, segmentation_profile_id=source.segmentation_profile.profile_id, segmentation_profile_version=source.segmentation_profile.profile_version, profile_id=source.ownership_profile.profile_id, units=units, projection_groups=tuple(groups), status=StatusVector(processing=StatusValue.COMPLETE if not findings else StatusValue.BLOCKED, completeness=StatusValue.COMPLETE if not findings else StatusValue.INCOMPLETE, compliance=StatusValue.CLEAN if not findings else StatusValue.FAILED, review=StatusValue.NOT_STARTED, publication=StatusValue.READY if not findings else StatusValue.NOT_READY), provenance=())
-        return manifest, tuple(findings)
+        return manifest, tuple(findings), tuple(protected_artifacts)
 
     def _blocked_manifest(self, source: CanonicalSourcePackage, run_snapshot_digest: str, records: list[UnitRecord], observed: str) -> tuple[UnitManifest, tuple[PreparationFinding, ...]]:
         manifest = UnitManifest(source_package_digest=sha256_digest(canonical_bytes(source)), run_snapshot_digest=run_snapshot_digest, segmentation_profile_id=source.segmentation_profile.profile_id, segmentation_profile_version=source.segmentation_profile.profile_version, profile_id=source.ownership_profile.profile_id, units=tuple(records), projection_groups=(), status=StatusVector(processing=StatusValue.BLOCKED, completeness=StatusValue.INCOMPLETE, compliance=StatusValue.FAILED, review=StatusValue.NOT_STARTED, publication=StatusValue.NOT_READY), provenance=())
         return manifest, (self._finding("invalid-declared-projection", "projection-profile", observed),)
+
+    def _persist_protected_artifacts(self, manifest: UnitManifest, artifacts: tuple[InlineBindingMap | ProtectedBlockSegments, ...]) -> UnitManifest:
+        maps: dict[str, str] = {}
+        segments: dict[str, str] = {}
+        for artifact in artifacts:
+            digest = self._put(artifact)
+            if isinstance(artifact, InlineBindingMap):
+                maps[artifact.source_unit_id] = digest
+            else:
+                segments[artifact.source_unit_id] = digest
+        updated = tuple(record.model_copy(update={
+            "inline_binding_map_digest": maps.get(record.source_unit_id),
+            "protected_segments_digest": segments.get(record.source_unit_id),
+        }) if record.source_unit_id in maps or record.source_unit_id in segments else record for record in manifest.units)
+        return manifest.model_copy(update={"units": updated})
 
     @staticmethod
     def _assert_prior_integrity(source: CanonicalSourcePackage, records: Iterable[UnitRecord], prior: UnitManifest | None) -> None:

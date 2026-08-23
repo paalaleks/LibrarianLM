@@ -1,5 +1,6 @@
 """Deterministic workflow entry points."""
 
 from .prepare import ConfirmationResult, PrepareExecutionResult, PrepareWorkflow
+from .assemble import AssemblyExecutionResult, AssemblyWorkflow
 
-__all__ = ["ConfirmationResult", "PrepareExecutionResult", "PrepareWorkflow"]
+__all__ = ["AssemblyExecutionResult", "AssemblyWorkflow", "ConfirmationResult", "PrepareExecutionResult", "PrepareWorkflow"]

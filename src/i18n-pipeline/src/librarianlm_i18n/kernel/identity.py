@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import base64
 import re
 from typing import Annotated
 
@@ -57,6 +58,7 @@ __all__ = [
     "StructuralFingerprint",
     "TokenId",
     "derive_typed_id",
+    "derive_token_id",
     "is_sha256_digest",
     "render_protected_token",
     "sha256_digest",
@@ -82,6 +84,21 @@ def derive_typed_id(prefix: str, identity_material: object) -> str:
     if not re.fullmatch(r"[a-z][a-z0-9-]*", prefix):
         raise ValueError("identity prefixes must be lowercase kebab-case")
     return f"{prefix}:{sha256_digest(canonical_bytes(identity_material))}"
+
+
+def derive_token_id(source_unit_id: str, kind: str, source_order_ordinal: int) -> str:
+    """Return the exact, unit-bound protected-token identifier.
+
+    The truncated base32 form is deliberately an identifier rather than a
+    digest: its full identity material remains in the immutable binding map.
+    """
+
+    if not re.fullmatch(r"source-unit:[0-9a-f]{64}", source_unit_id):
+        raise ValueError("protected token IDs require a source-unit identity")
+    if not isinstance(kind, str) or not kind or not isinstance(source_order_ordinal, int) or source_order_ordinal < 0:
+        raise ValueError("protected token IDs require a nonempty kind and nonnegative ordinal")
+    raw = hashlib.sha256(canonical_bytes({"source_unit_id": source_unit_id, "kind": kind, "source_order_ordinal": source_order_ordinal})).digest()
+    return base64.b32encode(raw).decode("ascii")[:26]
 
 
 def is_sha256_digest(value: str) -> bool:

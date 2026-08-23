@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from librarianlm_i18n.kernel.contracts import CanonicalSourcePackage, ContentClass, Eligibility, StructuralLocation, TypedLocator
+from librarianlm_i18n.kernel.contracts import CanonicalSourcePackage, ContentClass, Eligibility, InlineBindingMap, ProtectedBlockSegments, StructuralLocation, TypedLocator, UnitRecord
 from librarianlm_i18n.kernel.errors import ActionableError
 from librarianlm_i18n.kernel.identity import Sha256Digest, StructuralFingerprint
 
@@ -16,7 +16,7 @@ class SelectedSourceSlot:
         self, *, location: StructuralLocation, locator: TypedLocator,
         structural_fingerprint: StructuralFingerprint, text: str,
         text_digest: Sha256Digest, content_class: ContentClass,
-        eligibility: Eligibility, eligibility_reason: str,
+        eligibility: Eligibility, eligibility_reason: str, protected_block: bool = False,
     ) -> None:
         self.location = location
         self.locator = locator
@@ -26,6 +26,7 @@ class SelectedSourceSlot:
         self.content_class = content_class
         self.eligibility = eligibility
         self.eligibility_reason = eligibility_reason
+        self.protected_block = protected_block
 
 
 class HtmlSelectionResult:
@@ -38,5 +39,42 @@ class HtmlSelectionResult:
         self.error = error
 
 
+class ProtectedBlockResult:
+    def __init__(self, *, source_text: str | None = None, binding_map: InlineBindingMap | None = None, segments: ProtectedBlockSegments | None = None, error: ActionableError | None = None) -> None:
+        successful = source_text is not None and binding_map is not None and segments is not None
+        if successful == (error is not None):
+            raise ValueError("protected block results require exact artifacts or an error")
+        self.source_text = source_text
+        self.binding_map = binding_map
+        self.segments = segments
+        self.error = error
+
+
+class HtmlCloneResult:
+    def __init__(self, *, document: object | None = None, error: ActionableError | None = None) -> None:
+        if (document is None) == (error is None):
+            raise ValueError("HTML clone results require exactly one document or error")
+        self.document = document
+        self.error = error
+
+
+class HtmlMutationResult:
+    def __init__(self, *, error: ActionableError | None = None) -> None:
+        self.error = error
+
+
+class HtmlSerializationResult:
+    def __init__(self, *, html: str | None = None, error: ActionableError | None = None) -> None:
+        if (html is None) == (error is None):
+            raise ValueError("HTML serialization results require exactly one HTML value or error")
+        self.html = html
+        self.error = error
+
+
 class HtmlDocument(Protocol):
     def select(self, package: CanonicalSourcePackage) -> HtmlSelectionResult: ...
+    def protected_block(self, package: CanonicalSourcePackage, slot: SelectedSourceSlot, source_unit_id: str) -> ProtectedBlockResult: ...
+    def clone(self, package: CanonicalSourcePackage) -> HtmlCloneResult: ...
+    def rebind(self, document: object, unit: UnitRecord, binding_map: InlineBindingMap, target: str) -> HtmlMutationResult: ...
+    def apply_plain(self, document: object, unit: UnitRecord, target: str) -> HtmlMutationResult: ...
+    def serialize(self, document: object) -> HtmlSerializationResult: ...

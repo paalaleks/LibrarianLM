@@ -9,7 +9,7 @@ from .artifact_store import (
     RecoveryResult,
     StoreResult,
 )
-from .html_document import HtmlDocument, HtmlSelectionResult, SelectedSourceSlot
+from .html_document import HtmlCloneResult, HtmlDocument, HtmlMutationResult, HtmlSelectionResult, HtmlSerializationResult, ProtectedBlockResult, SelectedSourceSlot
 from .package_signer import PackageSigner, SignatureResult, VerificationResult
 
 __all__ = [
@@ -21,7 +21,11 @@ __all__ = [
     "RecoveryResult",
     "StoreResult",
     "HtmlDocument",
+    "HtmlCloneResult",
+    "HtmlMutationResult",
     "HtmlSelectionResult",
+    "HtmlSerializationResult",
+    "ProtectedBlockResult",
     "SelectedSourceSlot",
     "PackageSigner",
     "SignatureResult",

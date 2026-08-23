@@ -39,7 +39,7 @@ development_status:
   1-1-bootstrap-the-i18n-package-and-shared-kernel-contracts: review
   1-2-implement-durable-artifact-state-and-recovery: review
   1-3-prepare-stable-source-units: review
-  1-4-preserve-inline-structure-and-assemble-drafts: backlog
+  1-4-preserve-inline-structure-and-assemble-drafts: review
   1-5-validate-drafts-and-emit-machine-truth-reports: backlog
   1-6-expose-fixture-mode-workflows-and-orchestration: backlog
   epic-1-retrospective: optional

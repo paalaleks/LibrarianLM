@@ -38,6 +38,13 @@ __all__ = [
     "GatewayReceipt",
     "HumanEditSet",
     "InlineBindingMap",
+    "ProtectedBlockSegments",
+    "ProtectedSegment",
+    "FixtureTarget",
+    "FixtureTargets",
+    "CandidateDraft",
+    "ApplicationEvidence",
+    "AssemblyResult",
     "KernelModel",
     "MachineFinal",
     "ManifestLink",
@@ -165,6 +172,7 @@ class UnitRecord(VersionedContract):
     eligibility_reason: StrictStr = Field(min_length=1)
     projection_group_id: ProjectionGroupId | None = None
     inline_binding_map_digest: Sha256Digest | None = None
+    protected_segments_digest: Sha256Digest | None = None
     lifecycle_state: UnitLifecycleState
     proposal: ProvenanceReference | None = None
     evaluation: ProvenanceReference | None = None
@@ -260,7 +268,7 @@ class ProjectionProfile(VersionedContract):
 class SegmentationProfile(VersionedContract):
     profile_id: ComponentId
     profile_version: StrictStr = Field(min_length=1)
-    rule: Literal["fixture-v1-one-unit-per-nonblank-slot"]
+    rule: Literal["fixture-v1-one-unit-per-nonblank-slot", "fixture-v2-protected-blocks"]
 
 
 class PreparationFinding(VersionedContract):
@@ -426,6 +434,96 @@ class InlineBindingMap(VersionedContract):
     source_digest: Sha256Digest
     entries: tuple[TokenEntry, ...]
     map_digest: Sha256Digest
+
+    @model_validator(mode="after")
+    def map_is_complete_and_digest_bound(self) -> "InlineBindingMap":
+        entries = self.entries
+        if not entries:
+            raise ValueError("protected binding maps require entries")
+        if tuple(entry.source_order_ordinal for entry in entries) != tuple(range(len(entries))):
+            raise ValueError("protected binding entries require exact canonical ordinals")
+        ids = tuple(entry.token_id for entry in entries)
+        if len(set(ids)) != len(ids):
+            raise ValueError("protected binding token IDs must be unique")
+        by_id = {entry.token_id: entry for entry in entries}
+        stack: list[TokenEntry] = []
+        for entry in entries:
+            from .identity import derive_token_id
+            if entry.token_id != derive_token_id(self.source_unit_id, entry.kind, entry.source_order_ordinal):
+                raise ValueError("protected binding token ID must derive from unit, kind, and ordinal")
+            if entry.kind not in {"open", "close", "empty"}:
+                raise ValueError("protected binding entries must use open, close, or empty kinds")
+            if entry.kind == "empty":
+                if entry.pair_id is not None:
+                    raise ValueError("empty protected bindings must be singleton entries")
+            elif entry.kind == "open":
+                if entry.pair_id is None or entry.pair_id not in by_id:
+                    raise ValueError("open protected bindings require a paired close entry")
+                stack.append(entry)
+            else:
+                if entry.pair_id is None or not stack:
+                    raise ValueError("close protected bindings require a balanced open entry")
+                opening = stack.pop()
+                if opening.pair_id != entry.token_id or entry.pair_id != opening.token_id:
+                    raise ValueError("protected binding pairs must be balanced and reciprocal")
+        if stack:
+            raise ValueError("protected binding entries cannot leave an open pair")
+        from .canonical import canonical_bytes
+        from .identity import sha256_digest
+        expected = sha256_digest(canonical_bytes({
+            "schema_version": self.schema_version,
+            "source_unit_id": self.source_unit_id,
+            "source_digest": self.source_digest,
+            "entries": tuple(entry.model_dump(mode="json") for entry in entries),
+        }))
+        if self.map_digest != expected:
+            raise ValueError("protected binding map digest must bind its exact entries")
+        return self
+
+
+class ProtectedSegment(VersionedContract):
+    ordinal: StrictInt = Field(ge=0)
+    value: StrictStr
+
+
+class ProtectedBlockSegments(VersionedContract):
+    source_unit_id: SourceUnitId
+    source_digest: Sha256Digest
+    segments: tuple[ProtectedSegment, ...] = Field(min_length=1)
+    binding_map_digest: Sha256Digest
+    segments_digest: Sha256Digest
+
+    @model_validator(mode="after")
+    def segments_are_canonical_and_digest_bound(self) -> "ProtectedBlockSegments":
+        if tuple(item.ordinal for item in self.segments) != tuple(range(len(self.segments))):
+            raise ValueError("protected segments require exact canonical ordinals")
+        from .canonical import canonical_bytes
+        from .identity import sha256_digest
+        expected = sha256_digest(canonical_bytes({
+            "schema_version": self.schema_version, "source_unit_id": self.source_unit_id,
+            "source_digest": self.source_digest,
+            "segments": tuple(item.model_dump(mode="json") for item in self.segments),
+            "binding_map_digest": self.binding_map_digest,
+        }))
+        if self.segments_digest != expected:
+            raise ValueError("protected segments digest must bind exact segments and map")
+        return self
+
+
+class FixtureTarget(VersionedContract):
+    source_unit_id: SourceUnitId
+    value: StrictStr
+
+
+class FixtureTargets(VersionedContract):
+    targets: tuple[FixtureTarget, ...]
+
+    @model_validator(mode="after")
+    def target_ids_are_unique_and_ordered(self) -> "FixtureTargets":
+        ids = tuple(item.source_unit_id for item in self.targets)
+        if len(set(ids)) != len(ids):
+            raise ValueError("fixture targets must not repeat a source unit")
+        return self
 
 
 class ContextRole(StrEnum):
@@ -670,7 +768,56 @@ class RunReference(VersionedContract):
 
 class AssemblyReport(VersionedContract):
     manifest_digest: Sha256Digest
-    findings: tuple[Finding, ...]
+    findings: tuple[Finding, ...] = ()
+    candidate_draft_digest: Sha256Digest | None = None
+    application_evidence_digest: Sha256Digest | None = None
+
+    @model_validator(mode="after")
+    def outputs_are_paired(self) -> "AssemblyReport":
+        if (self.candidate_draft_digest is None) != (self.application_evidence_digest is None):
+            raise ValueError("assembly reports pair candidate draft and application evidence")
+        return self
+
+
+class CandidateDraft(VersionedContract):
+    source_package_digest: Sha256Digest
+    manifest_digest: Sha256Digest
+    html: StrictStr
+    html_digest: Sha256Digest
+
+    @model_validator(mode="after")
+    def html_digest_binds_exact_candidate(self) -> "CandidateDraft":
+        from .identity import sha256_digest
+        if sha256_digest(self.html.encode("utf-8")) != self.html_digest:
+            raise ValueError("candidate draft digest must bind exact UTF-8 HTML")
+        return self
+
+
+class ApplicationEvidence(VersionedContract):
+    manifest_digest: Sha256Digest
+    applied_source_unit_ids: tuple[SourceUnitId, ...]
+    candidate_html_digest: Sha256Digest
+    target_digest: Sha256Digest
+    projection_map_digest: Sha256Digest | None = None
+    applied_member_ids: tuple[SourceUnitId, ...] = ()
+
+    @model_validator(mode="after")
+    def application_ids_are_unique_and_ordered(self) -> "ApplicationEvidence":
+        if len(set(self.applied_source_unit_ids)) != len(self.applied_source_unit_ids):
+            raise ValueError("application evidence cannot apply a unit more than once")
+        return self
+
+
+class AssemblyResult(VersionedContract):
+    report: AssemblyReport
+    draft: CandidateDraft | None = None
+
+    @model_validator(mode="after")
+    def result_matches_report(self) -> "AssemblyResult":
+        published = self.report.candidate_draft_digest is not None
+        if published != (self.draft is not None):
+            raise ValueError("assembly result draft presence must match its report")
+        return self
 
 
 class ValidationReport(VersionedContract):
@@ -750,4 +897,16 @@ class UnitManifest(VersionedContract):
             raise ValueError("projection canonical source units must exist in the manifest")
         if any(unit.projection_group_id is not None and unit.projection_group_id not in groups for unit in self.units):
             raise ValueError("every declared unit projection group must resolve in the manifest")
+        for group in self.projection_groups:
+            members = tuple(unit for unit in self.units if unit.projection_group_id == group.group_id)
+            if not members:
+                raise ValueError("projection maps require manifest member units")
+            if group.canonical_source_unit_id not in {member.source_unit_id for member in members}:
+                raise ValueError("projection canonical unit must belong to its projection group")
+            if tuple(member.locator for member in members) != group.member_locators:
+                raise ValueError("projection maps must exactly match canonical member locator order")
+        for unit in self.units:
+            paired = (unit.inline_binding_map_digest is None) == (unit.protected_segments_digest is None)
+            if not paired:
+                raise ValueError("protected units require both a binding map and protected segments")
         return self
