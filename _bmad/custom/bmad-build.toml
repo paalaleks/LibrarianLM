@@ -1,0 +1,6 @@
+[workflow]
+
+persistent_facts = [
+  "Subagent model routing: use the latest available Sol model (gpt-5.6-sol when available) at medium effort for spec planning and planning investigations; use the latest available Terra model (gpt-5.6-terra when available) at high effort for research and epic-context compilation; use Terra at high effort for implementation; use Terra at medium effort for code review. Never use Terra for spec planning, and never use Sol for implementation or code review.",
+  "Code review iteration limit: never run more than two review iterations for one user-requested task or workflow. Parallel review layers in one pass collectively count as one iteration; reimplementation or fixes do not reset the counter. After iteration two, triage findings, apply in-scope fixes, run non-review verification, and report unresolved issues instead of launching another reviewer.",
+]

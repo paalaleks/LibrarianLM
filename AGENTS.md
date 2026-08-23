@@ -6,20 +6,6 @@
 
 - All i18n pipeline code lives under `src/i18n-pipeline`. Do not add those files at the repo root or under other `src/` packages.
 
-## Subagent model routing
-
-- Spec planning: use the latest available Sol model (`gpt-5.6-sol` when available) at **medium effort**.
-- Research workflows: use the latest available Terra model (`gpt-5.6-terra` when available) at **high effort**.
-- Implementation: use the latest available Terra model (`gpt-5.6-terra` when available) at **high effort**.
-- Code review: use the latest available Terra model (`gpt-5.6-terra` when available) at **medium effort**.
-- Do not use Terra for spec planning, and do not use Sol for implementation or code review.
-
-## Code review iteration limit
-
-- Never run more than two code review iterations for one user-requested task or workflow. An iteration is one complete review pass over that task's current diff; parallel review layers in the same pass collectively count as one iteration.
-- Reimplementation or fixes after review do not reset the counter. Only a new user-requested task with materially different scope starts a new counter.
-- After the second iteration, do not launch another reviewer. Triage the findings, apply in-scope fixes, run all applicable non-review verification, and document any rejected, deferred, or unresolved findings. If verification still fails or a high-impact finding remains unresolved, stop and report it to the user instead of starting a third iteration.
-
 ## Context7
 
 Always use Context7 when I need library/API documentation, code generation, setup or configuration steps without me
