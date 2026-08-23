@@ -1,0 +1,21 @@
+[project]
+name = "librarianlm-i18n"
+version = "0.1.0"
+description = "Deterministic i18n pipeline shared kernel"
+requires-python = "==3.14.4"
+dependencies = [
+  "lxml==6.1.2",
+  "pydantic==2.13.4",
+]
+
+[build-system]
+requires = ["uv_build==0.11.19"]
+build-backend = "uv_build"
+
+[tool.uv]
+package = true
+required-version = "==0.11.19"
+
+[tool.uv.build-backend]
+module-name = "librarianlm_i18n"
+module-root = "src"

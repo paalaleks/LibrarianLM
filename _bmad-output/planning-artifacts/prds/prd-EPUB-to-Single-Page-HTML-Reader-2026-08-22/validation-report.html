@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PRD Validation: EPUB to Single-Page HTML Reader</title>
+<style>
+  :root {
+    --bg: #fafaf9;
+    --surface: #ffffff;
+    --border: #e7e5e4;
+    --text: #1c1917;
+    --muted: #78716c;
+    --verdict-strong: #16a34a;
+    --verdict-adequate: #65a30d;
+    --verdict-thin: #d97706;
+    --verdict-broken: #dc2626;
+    --sev-low: #64748b;
+    --sev-medium: #ca8a04;
+    --sev-high: #ea580c;
+    --sev-critical: #dc2626;
+    --grade-exc: #16a34a;
+    --grade-good: #65a30d;
+    --grade-fair: #d97706;
+    --grade-poor: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    font-size: 15px;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 32px 24px 64px; }
+  header.report-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 24px;
+  }
+  .title h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+  .title .subtitle { color: var(--muted); font-size: 13px; margin-top: 4px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .grade {
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-weight: 600;
+    color: white;
+    font-size: 15px;
+    white-space: nowrap;
+  }
+  .grade-excellent { background: var(--grade-exc); }
+  .grade-good { background: var(--grade-good); }
+  .grade-fair { background: var(--grade-fair); }
+  .grade-poor { background: var(--grade-poor); }
+  .synthesis {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--muted);
+    border-radius: 8px;
+    padding: 18px 22px;
+    margin-bottom: 24px;
+    font-size: 15.5px;
+  }
+  .synthesis p { margin: 0 0 10px; }
+  .synthesis p:last-child { margin-bottom: 0; }
+  .dimension-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+  .dim-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .dim-card .dim-name { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .dim-card .dim-verdict { font-size: 14px; font-weight: 600; }
+  section.dimension, section.reviewer-section { margin-bottom: 14px; }
+  section.dimension details, section.reviewer-section details {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  section summary {
+    padding: 14px 20px;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  section summary::-webkit-details-marker { display: none; }
+  section summary::before {
+    content: "▸";
+    display: inline-block;
+    color: var(--muted);
+    transition: transform 0.15s ease;
+  }
+  section details[open] summary::before { transform: rotate(90deg); }
+  section summary h2 {
+    display: inline;
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    flex: 1;
+  }
+  .verdict-pill {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: white;
+  }
+  .verdict-strong { background: var(--verdict-strong); }
+  .verdict-adequate { background: var(--verdict-adequate); }
+  .verdict-thin { background: var(--verdict-thin); }
+  .verdict-broken { background: var(--verdict-broken); }
+  .dim-body { padding: 4px 20px 18px; }
+  .dim-judgment { color: var(--text); font-size: 14.5px; }
+  .dim-judgment p { margin: 0 0 10px; }
+  .findings-list { padding: 0 20px 4px; }
+  article.finding {
+    padding: 14px 0;
+    border-top: 1px solid var(--border);
+  }
+  article.finding:first-child { border-top: none; }
+  article.finding header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  .badge {
+    font-size: 10.5px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    line-height: 1.4;
+  }
+  .badge-sev-low { background: rgba(100, 116, 139, 0.12); color: var(--sev-low); }
+  .badge-sev-medium { background: rgba(202, 138, 4, 0.14); color: var(--sev-medium); }
+  .badge-sev-high { background: rgba(234, 88, 12, 0.14); color: var(--sev-high); }
+  .badge-sev-critical { background: rgba(220, 38, 38, 0.14); color: var(--sev-critical); }
+  .finding-title { margin: 0; font-size: 15px; font-weight: 500; flex: 1; min-width: 200px; }
+  .finding-location { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; color: var(--muted); }
+  .finding-note, .finding-fix { margin-top: 6px; font-size: 14px; }
+  .finding-fix strong { color: var(--muted); font-weight: 500; }
+  .reviewer-source {
+    font-size: 12px;
+    color: var(--muted);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  .mechanical {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-top: 24px;
+    font-size: 14px;
+  }
+  .mechanical h3 { margin: 0 0 10px; font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .mechanical ul { margin: 0; padding-left: 20px; }
+  .mechanical li { margin-bottom: 4px; color: var(--text); }
+  footer.report-footer {
+    margin-top: 40px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--muted);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  footer .meta { display: flex; gap: 24px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+  <div class="container">
+    <header class="report-header">
+      <div class="title">
+        <h1>EPUB to Single-Page HTML Reader — Validation Report</h1>
+        <div class="subtitle">_bmad-output/planning-artifacts/prds/prd-LibrarianLM-2026-08-22/prd.md</div>
+      </div>
+      <div class="grade grade-fair">Fair</div>
+    </header>
+
+    <div class="synthesis">
+      <p>This is a decision-ready internal-tool PRD: the thesis (faithful, offline, byte-identical one-file readers; converter-not-editor; one canonical template) actually governs features, non-goals, and metrics, including honest counter-metrics. What holds up is trade-off honesty and operational success criteria. What is at risk for architecture and story work is done-ness at the edges—especially the unsupported-element allowlist, leftover image/accessibility language after the omit-images decision, and confirmed failure/recovery behavior that lives in §11/addendum rather than as FRs.</p>
+      <p>The completeness/feasibility pass shifts the picture: §11/§12 close the document while CLI vs skill I/O, Conversion Summary shape, dual-parser identity, and FR-11 vs FR-16 remain unspecified. Those items are blocking before development even though rubric dimensions are strong/adequate.</p>
+    </div>
+
+    <div class="dimension-summary">
+      <div class="dim-card">
+        <div class="dim-name">Decision-readiness</div>
+        <div class="dim-verdict" style="color: var(--verdict-strong)">strong</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Substance over theater</div>
+        <div class="dim-verdict" style="color: var(--verdict-strong)">strong</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Strategic coherence</div>
+        <div class="dim-verdict" style="color: var(--verdict-strong)">strong</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Done-ness clarity</div>
+        <div class="dim-verdict" style="color: var(--verdict-adequate)">adequate</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Scope honesty</div>
+        <div class="dim-verdict" style="color: var(--verdict-strong)">strong</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Downstream usability</div>
+        <div class="dim-verdict" style="color: var(--verdict-adequate)">adequate</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Shape fit</div>
+        <div class="dim-verdict" style="color: var(--verdict-strong)">strong</div>
+      </div>
+    </div>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>Decision-readiness</h2>
+          <span class="verdict-pill verdict-strong">strong</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>A decision-maker can act. Choices are stated as choices: no LLM rewrite, omit images/media, trusted-source, discard obfuscated fonts, collapsible sheet, one shared accent, fail atomic on parser disagreement. What was given up is named. The remaining tension is fixed-layout “best-effort,” whose bound is not yet a decision.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">Best-effort fixed-layout has no bound</h3>
+              <span class="finding-location">§4.2 FR-6; §9.2</span>
+            </header>
+            <div class="finding-note">Architecture cannot tell fail-closed from “emit whatever the text spine yields.”</div>
+            <div class="finding-fix"><strong>Fix:</strong> Define the degraded contract and drop the adjective “best-effort.”</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>Substance over theater</h2>
+          <span class="verdict-pill verdict-strong">strong</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Content is earned. One journey (Nora), a non-generic vision, Book Rail as the signature element, product-specific NFRs. No AI innovation theater.</p>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>Strategic coherence</h2>
+          <span class="verdict-pill verdict-strong">strong</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Thesis is consistent: a portable reading copy. Features, MVP, success metrics, and counter-metrics all serve that thesis rather than activity metrics.</p>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>Done-ness clarity</h2>
+          <span class="verdict-pill verdict-adequate">adequate</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Most FRs carry testable consequences. Weak spots are allowlists, adjectives, leftover image-alt language, and failure/recovery that lives in §11/addendum rather than as FRs.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">No supported-markup allowlist</h3>
+              <span class="finding-location">§4.3 FR-8</span>
+            </header>
+            <div class="finding-note">“Preserved where valid and supported” is the entire transform contract without an inventory.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Attach a preserve / strip / fail table and report stripped categories.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Failure/recovery contract is not an FR</h3>
+              <span class="finding-location">§11; addendum H</span>
+            </header>
+            <div class="finding-note">Agree-and-recover vs disagree-and-emit-no-file is decided but not an FR. FR-18 only covers parity.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Add FR-7 with those consequences.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">“Usable” navigation source is undefined</h3>
+              <span class="finding-location">§4.2 FR-5</span>
+            </header>
+            <div class="finding-note">Empty nav, zero content refs, or all-missing targets are unspecified.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Define usable and when to fall through to NCX/headings.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">Image alt vs image omission</h3>
+              <span class="finding-location">FR-11 vs FR-16</span>
+            </header>
+            <div class="finding-note">Images are absent, yet alternative text must be preserved.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Delete image-alt from FR-16, or specify a visible-text fallback and report it.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">“Interactively usable” and unnamed corpus</h3>
+              <span class="finding-location">NFR-5; §9.1</span>
+            </header>
+            <div class="finding-note">No corpus titles and no interactivity bound beyond adjectives.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Point at addendum F and SM-4 checks.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>Scope honesty</h2>
+          <span class="verdict-pill verdict-strong">strong</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Non-users, non-goals, and MVP out-of-scope do real work. The honesty leak is residual pre-decision language in the glossary and a stale memlog.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">Glossary still implies embeddable resources</h3>
+              <span class="finding-location">§3 Source Content</span>
+            </header>
+            <div class="finding-note">“Supported embedded resources” reads as in-scope after omit-images.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Redefine Source Content as text/semantics/identifiers/links only.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>Downstream usability</h2>
+          <span class="verdict-pill verdict-adequate">adequate</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Chain-top extraction mostly works. Friction: missing FR-7, circular Supported EPUB, dual output-path wording.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">FR ID gap</h3>
+              <span class="finding-location">§4</span>
+            </header>
+            <div class="finding-note">FRs run FR-1…FR-6 then FR-8…FR-18.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Reuse FR-7 for parser-agreement/atomic-failure.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">Circular Supported EPUB</h3>
+              <span class="finding-location">§3; SM-1–SM-3</span>
+            </header>
+            <div class="finding-note">Definition depends on “this PRD” without a closed inclusion list.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Point at addendum F plus exclusions for protected / parser-disagreeing / unreadable packages.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>Shape fit</h2>
+          <span class="verdict-pill verdict-strong">strong</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Matches an internal, single-operator conversion skill. One UJ, operational metrics, aesthetic guardrails in addendum. Not over-formalized.</p>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <section class="reviewer-section">
+      <details open>
+        <summary>
+          <h2>Completeness and feasibility</h2>
+          <span class="reviewer-source">review-completeness-feasibility.md</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Not development-ready as a conversion contract. UX and fidelity intent are clear; CLI vs skill I/O, summary shape, and FR contradictions would force implementers to invent product law.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-critical">critical</span>
+              <h3 class="finding-title">False closure of open questions</h3>
+              <span class="finding-location">§11, §12</span>
+            </header>
+            <div class="finding-note">Document claims no blockers while CLI, JSON summary, slug, parser auto, and SKILL.md host are not FRs.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Reopen §11/§12 or promote those contracts into numbered FRs.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-critical">critical</span>
+              <h3 class="finding-title">CLI vs skill vs Conversion Summary</h3>
+              <span class="finding-location">FR-2, FR-3; brief §5; addendum B</span>
+            </header>
+            <div class="finding-note">Prose summary vs JSON CLI; host path vs /mnt/user-data/outputs/; no --parser or atomic write FR.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Split Converter CLI and skill presentation into two testable contracts.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-critical">critical</span>
+              <h3 class="finding-title">Dual-parser byte identity</h3>
+              <span class="finding-location">FR-17, FR-18</span>
+            </header>
+            <div class="finding-note">auto IR compare is addendum-only; HTML parser parity is likely infeasible without a frozen IR.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Make IR comparison and fail-on-disagreement FRs; name match vs unsupported fixtures.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-critical">critical</span>
+              <h3 class="finding-title">Image omission vs preserved alt</h3>
+              <span class="finding-location">FR-11 vs FR-16</span>
+            </header>
+            <div class="finding-note">Conflicting product rules on the same elements.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Drop alt with images or promote alt to text; rewrite FR-16.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Confirmed pipeline behavior missing as FRs</h3>
+              <span class="finding-location">§11; addendum H</span>
+            </header>
+            <div class="finding-note">Inclusion closure, cycles, first-occurrence warning, malformed recovery, no manifest.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Assign FR-7 and related FRs with stable IDs.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Chat upload vs trusted-source; missing skill host</h3>
+              <span class="finding-location">UJ-1; NFR-2; FR-1</span>
+            </header>
+            <div class="finding-note">Chat is a natural untrusted-upload surface; SKILL.md trigger/host/invocation unspecified.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Name host/operator; add a skill FR; accept residual risk or reopen NFR-2.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <div class="mechanical">
+      <h3>Mechanical notes</h3>
+      <ul>
+        <li>FR-7 missing; remaining FR and SM IDs unique; SM citations resolve.</li>
+        <li>Glossary drift: chapter count vs Spine Document count; language direction vs text direction; supported embedded resources vs omit-images.</li>
+        <li>Memlog still lists image embedding, hostile-input limits, and non-linear inclusion as unconfirmed after later overrides.</li>
+        <li>§0 brief path is wrong: actual file is docs/brief-epub-html/html-epub-skill-brief.md.</li>
+      </ul>
+    </div>
+
+    <footer class="report-footer">
+      <div class="meta">
+        <span>Rubric: .claude/skills/bmad-prd/assets/prd-validation-checklist.md</span>
+        <span>Generated: 2026-08-23T08:45:00+02:00</span>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>

@@ -1,0 +1,1 @@
+"""Shared-kernel contract tests."""

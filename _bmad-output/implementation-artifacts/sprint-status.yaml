@@ -1,0 +1,64 @@
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created, ready for development
+#   - in-progress: Developer actively working on implementation
+#   - review: Implementation complete, ready for review
+#   - done: Story completed
+
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+
+# Action Item Status:
+#   - open: Committed during a retrospective, not yet addressed
+#   - in-progress: Actively being worked on
+#   - done: Completed
+
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when its first story starts (via build's sprint sync)
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates the next story after the previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+# - Retrospective appends its action items to action_items; the status view surfaces open ones
+generated: 08-23-2026 15:32
+last_updated: 08-23-2026
+project: LibrarianLM
+project_key: NOKEY
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+development_status:
+  epic-1: in-progress
+  1-1-bootstrap-the-i18n-package-and-shared-kernel-contracts: review
+  1-2-implement-durable-artifact-state-and-recovery: backlog
+  1-3-prepare-stable-source-units: backlog
+  1-4-preserve-inline-structure-and-assemble-drafts: backlog
+  1-5-validate-drafts-and-emit-machine-truth-reports: backlog
+  1-6-expose-fixture-mode-workflows-and-orchestration: backlog
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  2-1-freeze-live-translation-controls-and-context: backlog
+  2-2-dispatch-attributed-and-recoverable-model-calls: backlog
+  2-3-generate-literal-anchors-and-idiomatic-candidates: backlog
+  2-4-evaluate-candidates-and-route-weak-units: backlog
+  2-5-recover-locally-and-re-evaluate-new-text: backlog
+  2-6-commit-machine-finals-and-preserve-honest-failure: backlog
+  2-7-orchestrate-a-complete-live-translation-run: backlog
+  epic-2-retrospective: optional
+
+  epic-3: backlog
+  3-1-inspect-an-artifact-first-review-package: backlog
+  3-2-record-non-destructive-edits-and-literary-findings: backlog
+  3-3-validate-and-export-reviewed-values: backlog
+  epic-3-retrospective: optional
+
+  epic-4: backlog
+  epic-4-retrospective: optional

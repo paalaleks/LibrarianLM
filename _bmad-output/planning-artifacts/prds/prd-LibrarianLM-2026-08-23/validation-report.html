@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<!--
+  PRD Validation Report — skeleton template.
+
+  This file is a starter the synthesis pass fills in directly. There is no
+  substitution engine. The LLM:
+    1. Reads {doc_workspace}/review-rubric.md and every review-{slug}.md from
+       additional reviewers.
+    2. Copies this skeleton.
+    3. Replaces the placeholder content (everything between TEMPLATE markers)
+       with the consolidated review, preserving the structure and CSS.
+    4. Writes the result to {doc_workspace}/validation-report.html.
+    5. Writes a markdown twin to {doc_workspace}/validation-report.md.
+
+  Visual rules the LLM must preserve:
+    - The container width, the color tokens, the typography.
+    - One dimension = one collapsible <section class="dimension">.
+    - Verdict pill uses the verdict-* class matching its judgment.
+    - Severity badge uses the sev-* class matching its level.
+    - Each extra reviewer (adversarial, etc.) gets its own collapsible section
+      below the rubric dimensions.
+    - The footer always shows the artifact paths and timestamp.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PRD Validation: Literary Translation Skill Workflow Suite</title>
+<style>
+  :root {
+    --bg: #fafaf9;
+    --surface: #ffffff;
+    --border: #e7e5e4;
+    --text: #1c1917;
+    --muted: #78716c;
+
+    --verdict-strong: #16a34a;
+    --verdict-adequate: #65a30d;
+    --verdict-thin: #d97706;
+    --verdict-broken: #dc2626;
+
+    --sev-low: #64748b;
+    --sev-medium: #ca8a04;
+    --sev-high: #ea580c;
+    --sev-critical: #dc2626;
+
+    --grade-exc: #16a34a;
+    --grade-good: #65a30d;
+    --grade-fair: #d97706;
+    --grade-poor: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    font-size: 15px;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 32px 24px 64px; }
+
+  header.report-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 24px;
+  }
+  .title h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+  .title .subtitle { color: var(--muted); font-size: 13px; margin-top: 4px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .grade {
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-weight: 600;
+    color: white;
+    font-size: 15px;
+    white-space: nowrap;
+  }
+  .grade-excellent { background: var(--grade-exc); }
+  .grade-good { background: var(--grade-good); }
+  .grade-fair { background: var(--grade-fair); }
+  .grade-poor { background: var(--grade-poor); }
+
+  .synthesis {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--muted);
+    border-radius: 8px;
+    padding: 18px 22px;
+    margin-bottom: 24px;
+    font-size: 15.5px;
+  }
+  .synthesis p { margin: 0 0 10px; }
+  .synthesis p:last-child { margin-bottom: 0; }
+
+  .dimension-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+  .dim-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .dim-card .dim-name { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .dim-card .dim-verdict { font-size: 14px; font-weight: 600; }
+
+  section.dimension, section.reviewer-section { margin-bottom: 14px; }
+  section.dimension details, section.reviewer-section details {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  section summary {
+    padding: 14px 20px;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  section summary::-webkit-details-marker { display: none; }
+  section summary::before {
+    content: "▸";
+    display: inline-block;
+    color: var(--muted);
+    transition: transform 0.15s ease;
+  }
+  section details[open] summary::before { transform: rotate(90deg); }
+  section summary h2 {
+    display: inline;
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    flex: 1;
+  }
+  .verdict-pill {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: white;
+  }
+  .verdict-strong { background: var(--verdict-strong); }
+  .verdict-adequate { background: var(--verdict-adequate); }
+  .verdict-thin { background: var(--verdict-thin); }
+  .verdict-broken { background: var(--verdict-broken); }
+
+  .dim-body { padding: 4px 20px 18px; }
+  .dim-judgment { color: var(--text); font-size: 14.5px; }
+  .dim-judgment p { margin: 0 0 10px; }
+
+  .findings-list { padding: 0 20px 4px; }
+  article.finding {
+    padding: 14px 0;
+    border-top: 1px solid var(--border);
+  }
+  article.finding:first-child { border-top: none; }
+  article.finding header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  .badge {
+    font-size: 10.5px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    line-height: 1.4;
+  }
+  .badge-sev-low { background: rgba(100, 116, 139, 0.12); color: var(--sev-low); }
+  .badge-sev-medium { background: rgba(202, 138, 4, 0.14); color: var(--sev-medium); }
+  .badge-sev-high { background: rgba(234, 88, 12, 0.14); color: var(--sev-high); }
+  .badge-sev-critical { background: rgba(220, 38, 38, 0.14); color: var(--sev-critical); }
+  .finding-title { margin: 0; font-size: 15px; font-weight: 500; flex: 1; min-width: 200px; }
+  .finding-location { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; color: var(--muted); }
+  .finding-note, .finding-fix { margin-top: 6px; font-size: 14px; }
+  .finding-fix strong { color: var(--muted); font-weight: 500; }
+
+  .reviewer-source {
+    font-size: 12px;
+    color: var(--muted);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  .mechanical {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-top: 24px;
+    font-size: 14px;
+  }
+  .mechanical h3 { margin: 0 0 10px; font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .mechanical ul { margin: 0; padding-left: 20px; }
+  .mechanical li { margin-bottom: 4px; color: var(--text); }
+
+  footer.report-footer {
+    margin-top: 40px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--muted);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  footer .meta { display: flex; gap: 24px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+  <div class="container">
+
+    <header class="report-header">
+      <div class="title">
+        <h1>Literary Translation Skill Workflow Suite — Validation Report</h1>
+        <div class="subtitle">_bmad-output/planning-artifacts/prds/prd-LibrarianLM-2026-08-23/prd.md</div>
+      </div>
+      <div class="grade grade-poor">Poor</div>
+    </header>
+
+    <div class="synthesis">
+      <p>The PRD has a real product thesis, named trade-offs, and integrity invariants that architecture can use as a spine: structure stays independent of generated language, extra generation hits weak units only, and fluent output is never publication readiness. It is <strong>not ready for development of the MVP as a buildable product</strong>. <code>status: final</code> overclaims planning completeness while the Pilot Profile, Baseline Method, language pair, evaluation pass/fail, neighbor-context policy, required editorial inputs, and review-surface sufficiency remain unfrozen.</p>
+      <p>Adversarial and verification-gap reviews agree and add three development-blocking product holes: there is no operable copyright/provider transfer policy, Machine Final “plain value” vs HTML emphasis/placeholders is unresolved, and SM-3 / editor protocol / evaluation circularity cannot be observed. Integrity work (dummy round-trip, manifests, honest failure) can start; generation, provider calls, and usefulness measurement cannot.</p>
+    </div>
+
+    <div class="dimension-summary">
+      <div class="dim-card">
+        <div class="dim-name">Decision-readiness</div>
+        <div class="dim-verdict" style="color: var(--verdict-adequate)">adequate</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Substance over theater</div>
+        <div class="dim-verdict" style="color: var(--verdict-strong)">strong</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Strategic coherence</div>
+        <div class="dim-verdict" style="color: var(--verdict-strong)">strong</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Done-ness clarity</div>
+        <div class="dim-verdict" style="color: var(--verdict-thin)">thin</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Scope honesty</div>
+        <div class="dim-verdict" style="color: var(--verdict-thin)">thin</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Downstream usability</div>
+        <div class="dim-verdict" style="color: var(--verdict-adequate)">adequate</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Shape fit</div>
+        <div class="dim-verdict" style="color: var(--verdict-adequate)">adequate</div>
+      </div>
+    </div>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>Decision-readiness</h2>
+          <span class="verdict-pill verdict-adequate">adequate</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Core product choices are stated as choices: Literal Anchor ineligible as Machine Final, no interactive gates after snapshot confirmation, local recovery, five quality states kept separate. A decision-maker still cannot green-light development of the translation method and pilot: FR-26 gates certification, not implementation start, and Open Question 1 remains a Translation Method blocker.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Implementation start vs certification is fudged</h3>
+              <span class="finding-location">§0, FR-26, frontmatter</span>
+            </header>
+            <div class="finding-note">§0: cannot be release-certified until Pilot Profile and Baseline Method are frozen; FR-26: before MVP implementation is certified. status: final reads as go-build.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Add a Development Readiness split: which workstreams may start on the generic contract versus what is blocked until Pilot Profile, Baseline Method, and context policy freeze.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Neighbor-context policy is open under a required FR</h3>
+              <span class="finding-location">§12 Q1, FR-9</span>
+            </header>
+            <div class="finding-note">Q1 must be resolved before Translation Method implementation, while FR-9 already requires declared, bounded context.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Freeze a default (source-only neighbors until committed targets exist; never mix in-flight targets) or mark FR-8–FR-12 blocked.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">Pilot sizing inputs are unset</h3>
+              <span class="finding-location">§8.1, FR-26</span>
+            </header>
+            <div class="finding-note">Language pair is chosen during implementation planning; FR-26 still requires pair, corpus, providers, content matrix, and numeric budgets.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Freeze a placeholder pair and matrix for engineering, or state that only contract/schema work proceeds until Product owns the profile.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">Real tensions lack [NOTE FOR PM]</h3>
+              <span class="finding-location">document-wide vs §12</span>
+            </header>
+            <div class="finding-note">The certify/build split, “when supported” content, and “existing surfaces” for review are deferred without a PM flag.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Add notes at those three tensions.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>Substance over theater</h2>
+          <span class="verdict-pill verdict-strong">strong</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Vision cannot be swapped into a generic MT PRD. Personas drive journeys. NFRs are product-specific. Counter-metrics refuse pass-through, model score, and completion-rate theater. No findings.</p>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>Strategic coherence</h2>
+          <span class="verdict-pill verdict-strong">strong</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>The thesis is the pipeline from preparation through honest comparison. The usefulness half of the thesis is carried by SM-3 as an assumption, not a validated target.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">The thesis metric is an unvalidated assumption</h3>
+              <span class="finding-location">SM-3, §13</span>
+            </header>
+            <div class="finding-note">30% lower median editor time with no increase in critical residual errors is tagged [ASSUMPTION] pending a baseline dry run.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Split into a mandatory measurement protocol under FR-27 and a 30% hypothesis that cannot gate implementation, only release certification.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details open>
+        <summary>
+          <h2>Done-ness clarity</h2>
+          <span class="verdict-pill verdict-thin">thin</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Deterministic FRs are the strongest part. Generation, judgment, and “supported content” are not done-able: FR-10/FR-11 have no pass/fail while §6 forbids fixing thresholds; FR-8 uses literary adjectives; FR-4 is “when supported.”</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-critical">critical</span>
+              <h3 class="finding-title">Evaluation and routing have no testable pass/fail</h3>
+              <span class="finding-location">FR-10, FR-11, §6</span>
+            </header>
+            <div class="finding-note">Route only Source Units with weak candidates or hard-rule violations — with no hard-rule catalog, scale, or gate definition.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Require a versioned Translation Method freeze artifact before FR-10–FR-14 are implementable; list rule categories in the PRD even if numeric thresholds stay in the method.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">FR-8 states literary quality as a system duty</h3>
+              <span class="finding-location">FR-8</span>
+            </header>
+            <div class="finding-note">“Closely enough to act as a faithfulness reference” and “must preserve meaning, emphasis, imagery” are not build-failable.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Bound FR-8 to artifacts produced; move quality into evaluator checklists / human residual-error measurement.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Supported content is a tautology</h3>
+              <span class="finding-location">FR-4, FR-17, FR-26</span>
+            </header>
+            <div class="finding-note">Classes are included “when supported”; a failing class is unsupported until the unwritten matrix excludes it.</div>
+            <div class="finding-fix"><strong>Fix:</strong> State a minimum included set for MVP, or empty matrix = no generation permitted.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Required vs optional editorial inputs unnamed</h3>
+              <span class="finding-location">FR-6</span>
+            </header>
+            <div class="finding-note">Missing required inputs stop the run; which of Terminology Sheet, Style Sheet, locked terms, and confirmation are blocking is unspecified.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Name blocking vs recorded-optional inputs.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">Inline emphasis rule conflicts with itself</h3>
+              <span class="finding-location">FR-16</span>
+            </header>
+            <div class="finding-note">Preserve identity and order of inline emphasis, yet mapped placement may move.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Wrappers/anchors stay; token-level remap allowed iff owning unit identity is preserved and locators resolve once.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">Review measurements are unnamed quantities</h3>
+              <span class="finding-location">FR-22, FR-23, FR-27</span>
+            </header>
+            <div class="finding-note">Edit magnitude and issue severity have no schema; book-level findings have no required fields.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Minimum fields (unit id, severity enum, timestamp, magnitude) and an explicit non-blocking rule vs SM-1.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">Accessibility NFR is an unresolved pointer</h3>
+              <span class="finding-location">NFR-5, §11</span>
+            </header>
+            <div class="finding-note">Must meet the source Reader Artifact’s contract; Reader Artifact is not in the Glossary.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Cite the governing Reader Artifact invariant doc or copy the bars this draft must not break.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-low">low</span>
+              <h3 class="finding-title">“Actionable” failure is undefined</h3>
+              <span class="finding-location">FR-2, FR-15, NFR-10</span>
+            </header>
+            <div class="finding-note">Actionable error / failure information has no minimum object.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Stable identity, stage, attempt, blocking vs retryable, next operator action.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details open>
+        <summary>
+          <h2>Scope honesty</h2>
+          <span class="verdict-pill verdict-thin">thin</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Remembered omissions are honest. Honesty fails at planning posture: five load-bearing assumptions plus open method blockers on a production-quality PRD marked final is a green-light blocker. NFR-9 collides with FR-26 on provider transfer.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-critical">critical</span>
+              <h3 class="finding-title">final with a blocker-density backlog</h3>
+              <span class="finding-location">frontmatter, §12, §13, FR-26</span>
+            </header>
+            <div class="finding-note">Unfrozen: Pilot Profile, Baseline Method, language pair, neighbor context, translation-specific governance, review-surface sufficiency, SM-3 target.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Set status to conditional/draft; add Development Readiness; do not treat this file as permission to implement FR-8–FR-15 or move source text to a provider.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Review MVP rests on an unvalidated surface assumption</h3>
+              <span class="finding-location">§8.2, FR-21–FR-22</span>
+            </header>
+            <div class="finding-note">Dedicated graphical review workspace is out; existing LibrarianLM surfaces are assumed sufficient without being named.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Name the surfaces and minimum inspect/edit/export operations, or spike UX before counting FR-21–FR-23 as MVP-complete.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Authorization is a non-user, not a requirement</h3>
+              <span class="finding-location">§2.2 vs §5.3</span>
+            </header>
+            <div class="finding-note">Bypassing access controls is named as a non-user; no FR/NFR says who may start a run on a given book.</div>
+            <div class="finding-fix"><strong>Fix:</strong> A Translation Run may start only under LibrarianLM authorization for that Canonical Source HTML.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">Skill packaging is a silent de-scope</h3>
+              <span class="finding-location">§1.1</span>
+            </header>
+            <div class="finding-note">Five outcomes may be separate skills or subworkflows; FR sections still name many Skill Workflows.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Note that architecture may collapse substeps inside the five outcomes provided FR-1–FR-3 hold; default inventory in Glossary.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">“Must not fix a provider” avoids a method freeze</h3>
+              <span class="finding-location">§6 vs §4.3</span>
+            </header>
+            <div class="finding-note">Vendor independence is then used so hard rules and gates never appear at product level.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Separate vendor independence from “MVP includes a freeze artifact for rules and thresholds.”</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>Downstream usability</h2>
+          <span class="verdict-pill verdict-adequate">adequate</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Glossary and IDs are mostly extractable. UX, architecture, and stories cannot extract a skill inventory or a state vocabulary. Rescue rate vs Recovery yield drift.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Five outcomes vs many Skill Workflows</h3>
+              <span class="finding-location">§1.1 vs §4</span>
+            </header>
+            <div class="finding-note">Prepare / Run / Assemble / Review / Compare versus preparation, generation, evaluation, routing, recovery, commitment, and more.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Glossary table: five invocable outcomes; named substeps; which are independently invocable in MVP.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">Domain nouns missing or drifting</h3>
+              <span class="finding-location">Glossary vs FR-20, UJ-3, FR-25, NFR-5</span>
+            </header>
+            <div class="finding-note">Unlisted: Reader Artifact, five quality states, hard rules, role titles. Drift: rescue rate vs Recovery yield.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Add entries; one name for recovery yield; define state names as Glossary terms.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-low">low</span>
+              <h3 class="finding-title">§8.2 assumption tag has no inline sentence</h3>
+              <span class="finding-location">§8.2 vs §13</span>
+            </header>
+            <div class="finding-note">[ASSUMPTION] only; the index supplies the claim.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Write the assumption in place like NFR-9.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>Shape fit</h2>
+          <span class="verdict-pill verdict-adequate">adequate</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Internal artifact-first capability spec is the right shape. Chain-top still feeds UX: FR-21–FR-23 describe inspect/edit/export on unnamed existing surfaces. Under-formalized for a PRD that claims to feed UX.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">UX is a named downstream consumer without an extractable MVP surface</h3>
+              <span class="finding-location">§11, §8.2, FR-21</span>
+            </header>
+            <div class="finding-note">Requirements are capability-based, then review still needs a human to inspect together and export.</div>
+            <div class="finding-fix"><strong>Fix:</strong> A one-page existing-surface contract, or explicit “UX workflow blocked until SM-1–SM-4” in Development Readiness.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="reviewer-section">
+      <details>
+        <summary>
+          <h2>Adversarial review</h2>
+          <span class="reviewer-source">review-adversarial-general.md</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>This PRD is a well-written honesty envelope wrapped around an unbuildable first increment. It freezes stance while leaving skill inventory, artifact fields, required units, Machine Final markup, Failed Unit resolution, and the Literary Editor’s edit surface to Architecture, a future Pilot Profile, or existing surfaces that do not exist. Status final is false advertising.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-critical">critical</span>
+              <h3 class="finding-title">Pilot Profile is a certification gate, not a build gate</h3>
+              <span class="finding-location">§0, FR-26, §8.1</span>
+            </header>
+            <div class="finding-note">A team that starts now will invent segmentation for poetry/tables/footnotes, then learn the profile excludes that class or that cost is 10× budget.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Make an approved Pilot Profile a start-of-implementation gate. Until it exists, only the deterministic dummy loop (FR-17) is in scope.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-critical">critical</span>
+              <h3 class="finding-title">No operable copyright/provider transfer policy</h3>
+              <span class="finding-location">NFR-9, FR-26, §10</span>
+            </header>
+            <div class="finding-note">Inherit-until-defined collides with approved-before-any-transfer. Literary MVP is copyrighted books sent to multiple models.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Translation-specific data-handling FR approved with the Pilot Profile before any model call on book text.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-critical">critical</span>
+              <h3 class="finding-title">Machine Final purity vs HTML reassembly unresolved</h3>
+              <span class="finding-location">glossary, FR-14, FR-16, FR-18</span>
+            </header>
+            <div class="finding-note">If the Final is plain text, assembly cannot place moved emphasis. If it is HTML, models emit wrappers — the failure determinism claims to prevent.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Specify payload type: plain text plus annotation map, or constrained fragment with tokens assembly rebinds.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Open Question 1 still blocks the method</h3>
+              <span class="finding-location">§12 Q1, FR-9, FR-24</span>
+            </header>
+            <div class="finding-note">Literary translation depends on whether unit N sees source-only neighbors, committed targets, or nothing. Parallel batching without that policy is a different method every night.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Resolve neighbor window, source vs committed-target, freeze-at-batch vs wait-for-predecessors, and Failed Unit predecessor behavior before any generation skill is specified.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Required Source Unit is undefined</h3>
+              <span class="finding-location">SM-1, FR-4, FR-15</span>
+            </header>
+            <div class="finding-note">Completeness is 100% of required units; required vs optional vs excluded vs unsupported is never defined.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Define those states with terminal effects on Translation Draft eligibility; bind the first matrix to the Pilot Profile.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Review/SM-3 depend on unspecified surfaces</h3>
+              <span class="finding-location">UJ-2, FR-21–23, §8.2</span>
+            </header>
+            <div class="finding-note">The existing surface is an EPUB→HTML reader, not a provenance inspector or edit store.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Specify MVP review as a skill contract (get provenance, put Human Edit, export) or a files-plus-checklist procedure that still captures FR-27.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Failed Units have no resolution path</h3>
+              <span class="finding-location">FR-15, FR-21, FR-3</span>
+            </header>
+            <div class="finding-note">One stubborn unit blocks literary review and SM-3. There is no unit-level retry, waiver, or editor-salvage path that does not mint a Machine Final.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Add Failed Unit lifecycle: retry bounds, diagnostics, whether a new run is the only fix, optional editor salvage without a complete Draft.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Baseline Method is a purpose, not a method</h3>
+              <span class="finding-location">FR-27, SM-3</span>
+            </header>
+            <div class="finding-note">Single-pass of what? Critical residual error, edit magnitude, qualified editor, and clock start are undefined.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Freeze baseline treatment, shared unit inventory, editor qualification, severity taxonomy, magnitude, timing, and N/exclusion rules.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Skill and artifact contracts promised then refused</h3>
+              <span class="finding-location">FR-1, FR-2, §6, §11</span>
+            </header>
+            <div class="finding-note">Must not fix schema, while FR-1 requires declared inputs, artifacts, and terminal states.</div>
+            <div class="finding-fix"><strong>Fix:</strong> MVP skill inventory and field-level product schema for every glossary artifact — not storage layout.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Editorial confirmation is an undesigned human gate</h3>
+              <span class="finding-location">FR-6, FR-3</span>
+            </header>
+            <div class="finding-note">Operator must confirm Terminology and Style before a run; no skill, artifact, or default for unclassified proposals.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Make pre-run confirmation an explicit Prepare-Translation terminal state with required vs optional inputs.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="reviewer-section">
+      <details>
+        <summary>
+          <h2>Verification-gap review</h2>
+          <span class="reviewer-source">review-verification-gap.md</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Integrity FRs are largely testable. Usefulness, editor protocol, and operating bounds are not. Generic Skill Workflow implementation can proceed on integrity FRs; pilot coding of generation, detectors, and review measurement cannot without freezing the items below.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-critical">critical</span>
+              <h3 class="finding-title">SM-3 has a target without a measurement system</h3>
+              <span class="finding-location">§9, FR-27, §13</span>
+            </header>
+            <div class="finding-note">Missing: Baseline Method identity, sample size, clocks, critical-residual definition, uncertainty, owner. FR-27 requires reporting those facts after the fact.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Freeze a Baseline Method card; require a dry run that can fail the 30% target as infeasible before implementation claims SM-3.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-critical">critical</span>
+              <h3 class="finding-title">Human-editor protocol is unspecified</h3>
+              <span class="finding-location">FR-22, FR-27, SM-3, SM-6</span>
+            </header>
+            <div class="finding-note">No qualification, blinding, magnitude formula, or severity rubric. The 30% claim can be gamed by assignment or by showing evaluators the scores.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Publish an editor protocol as a release-qualification artifact alongside the Pilot Profile.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-critical">critical</span>
+              <h3 class="finding-title">Evaluation circularity: model scores stand in for literary done</h3>
+              <span class="finding-location">FR-8/10/11/13/14 vs SM-C2</span>
+            </header>
+            <div class="finding-note">The only automated observers of faithfulness/naturalness are model evaluators that SM-C2 forbids treating as quality. No gold units or human spot-check sampling.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Human-rated gold subset; scores remain routing telemetry; forbid evaluator averages as release evidence.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Language-pair and corpus freeze happen too late</h3>
+              <span class="finding-location">FR-26, §8.1</span>
+            </header>
+            <div class="finding-note">Residual detectors, RTL, style, and fixtures are pair-dependent. An unfrozen corpus makes SM-3 and FR-17 cherry-pickable.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Freeze pair, corpus list, and include/exclude matrix before generation, detector, and editor-protocol implementation.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Provider, recovery, and cost are unbounded</h3>
+              <span class="finding-location">FR-8, FR-12, NFR-11</span>
+            </header>
+            <div class="finding-note">At least one Idiomatic Candidate with no maximum; additional Recovery Candidates with no cap; numeric budgets deferred to an unwritten profile.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Per-unit and per-run caps before any live provider call; missing caps are a failed precondition.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Passing/weak/compliant is unobservable while thresholds are forbidden</h3>
+              <span class="finding-location">§4.3–4.4, §6</span>
+            </header>
+            <div class="finding-note">FR-11 and FR-15 cannot be accepted on the PRD alone; implementations will invent incompatible gates.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Versioned Translation Method as test fixture in the Pilot Profile; keep numbers out of the generic contract.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Data-governance inheritance is untestable</h3>
+              <span class="finding-location">NFR-9, FR-26</span>
+            </header>
+            <div class="finding-note">No policy name, version, or location. If the parent policy is silent on copyrighted literary text, FR-26 has no fail test.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Cite the runtime policy artifact or mark translation-specific policy as a Pilot Profile blocker.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Artifact-first review assumes unnamed surfaces satisfy UJ-2</h3>
+              <span class="finding-location">§8.2, FR-21/FR-22</span>
+            </header>
+            <div class="finding-note">Engineering may ship JSON dumps and call FR-21 done, or block on an unscoped UI.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Named artifact schema plus named existing surface or CLI that demonstrates UJ-2 end-to-end.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <div class="mechanical">
+      <h3>Mechanical notes</h3>
+      <ul>
+        <li>Assumptions Index roundtrip: five index rows and five inline tags; §8.2 tag lacks the assumption sentence.</li>
+        <li>IDs FR-1–FR-27, UJ-1–UJ-3, SM-1–SM-6, SM-C1–C3, NFR-1–NFR-11 — no gaps or duplicates.</li>
+        <li>Glossary drift: Reader Artifact, five quality states, hard rules, content class, and role titles are used without entries; rescue rate vs Recovery yield.</li>
+        <li>Zero [NOTE FOR PM] callouts in the PRD body.</li>
+      </ul>
+    </div>
+
+    <footer class="report-footer">
+      <div class="meta">
+        <span>Rubric: .claude/skills/bmad-prd/assets/prd-validation-checklist.md</span>
+        <span>Generated: 2026-08-23T08:55:00+02:00</span>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>

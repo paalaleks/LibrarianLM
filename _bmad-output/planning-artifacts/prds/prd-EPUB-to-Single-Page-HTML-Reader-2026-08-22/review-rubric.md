@@ -1,0 +1,71 @@
+# PRD Quality Review — EPUB to Single-Page HTML Reader
+
+## Overall verdict
+This is a decision-ready internal-tool PRD: the thesis (faithful, offline, byte-identical one-file readers; converter-not-editor; one canonical template) actually governs features, non-goals, and metrics, including honest counter-metrics. What holds up is trade-off honesty and operational success criteria. What is at risk for architecture and story work is done-ness at the edges—especially the unsupported-element allowlist, leftover image/accessibility language after the omit-images decision, and confirmed failure/recovery behavior that lives in §11/addendum rather than as FRs.
+
+## Decision-readiness — strong
+A decision-maker can act. Choices are stated as choices, not “considerations”: no LLM rewrite of Source Content (§1, FR-1), omit images/media/remote resources with warnings (FR-11, §8, §11), trusted-source with no adversarial defenses (NFR-2), discard obfuscated fonts for system stacks (FR-6), collapsible sheet at every viewport (FR-13, §11), one shared accent (§6, §11), fail atomic on parser disagreement (§11). What was given up is named in §2.2, §8, and §9.2 (pagination, DRM circumvention, publisher styling, hosted API, per-book themes). Open Questions (§11) are not rhetorical leftovers; they record confirmed answers. Someone objecting to “why strip images / why no DRM / why no persistent sidebar” would find the objection acknowledged, not dodged.
+
+The remaining tension is fixed-layout: the PRD both refuses “faithful fixed-layout” (§8) and still converts it as “poor-fit warning and a best-effort conversion rather than an implied fidelity guarantee” (FR-6). That is a real product decision, but the bound of “best-effort” is not a decision yet—downstream will invent it.
+
+### Findings
+- **medium** Best-effort fixed-layout has no bound (§4.2 FR-6; §9.2) — FR-6 requires “a poor-fit warning and a best-effort conversion”; §9.2 only excludes “Fixed-layout fidelity beyond warning and best effort.” Architecture cannot tell fail-closed from “emit whatever the text spine yields.” *Fix:* Define the degraded contract (e.g. treat as Supported EPUB with mandatory warning and the same text/spine rules, or fail conversion after the warning) and drop the adjective “best-effort.”
+
+## Substance over theater — strong
+Content is earned. There is one journey (UJ-1, Nora), not a persona roster. The Vision cannot be swapped into a generic “reader app” PRD: it commits to no EPUB application, no network, no multi-file export, no LLM rewriting, and byte-identical output given identical inputs (§1). Differentiation is the Book Rail as “one expressive element” and a shelf that “look[s] like a coherent set” (§1, §6)—both drive FR-14 and the single-accent non-goal. NFRs are product-specific thresholds or explicit refusals, not boilerplate: “zero network requests” (NFR-1), “does not require adversarial archive, XML, or markup defenses” (NFR-2), preserve source a11y metadata but “must not invent missing semantics” (NFR-3), “no separate performance SLA” (NFR-5). No innovation theater around AI; the skill’s job is orchestration of a deterministic Converter.
+
+### Findings
+- None.
+
+## Strategic coherence — strong
+The thesis is consistent: a portable reading *copy*, not an editor, platform, or paginated simulation. Feature groups follow that arc (chat trigger → package/spine truth → faithful transform/cleanup → one template → determinism/diagnostics). MVP scope is a problem-solving capability (one artifact per upload), not a platform or revenue MVP; §9.1 matches the thesis rather than “what’s easy.” Success metrics validate the thesis: SHA-256 identity (SM-1), spine/link fidelity (SM-2), zero external requests (SM-3), not activity metrics. Counter-metrics are load-bearing: SM-C1 forbids hiding degradation to inflate success; SM-C2 forbids achieving determinism by silently dropping supported content; SM-C3 keeps visual fidelity subordinate to offline integrity.
+
+### Findings
+- None.
+
+## Done-ness clarity — adequate
+Most FRs carry testable consequences (SHA-256, 250 wpm, 5 MB warning, 900 px / 1 rem / 68 ch, `aria-expanded`, collision-free identifiers, omission counts by category). An engineer can implement the happy path and the DRM/font-obfuscation split without inventing product law. The weak spots are allowlists and adjectives that story creation will have to freeze.
+
+Confirmed pipeline behavior—malformed-body recovery only when parsers agree; atomic fail on disagreement; no conversion manifest—is decided in §11 and addendum H but is not an FR, so “done” for failure modes is split across documents. FR-8’s “preserved where valid and supported” has no element/attribute inventory. FR-5’s “usable” navigation document is undefined. FR-16 still requires preserving “image alternative text” after FR-11 removes images. NFR-5’s “interactively usable Reader Artifact on the agreed test corpus” names neither corpus titles (addendum F lists *kinds* of books, not fixtures) nor an interactivity bound.
+
+### Findings
+- **high** No supported-markup allowlist (§4.3 FR-8) — Consequences require that “Headings, paragraphs, blockquotes, lists, tables, emphasis, strong emphasis, language direction, and footnote semantics are preserved where valid and supported.” “Supported” is the entire transform contract; without an allowlist (and explicit drop/fail for everything else: `aside`, `figure` after img removal, MathML, `ruby`, `epub:type` extras), stories will diverge. *Fix:* Attach a preserve / strip / fail table and make Conversion Summary report stripped categories.
+- **high** Failure/recovery contract is not an FR (§11; addendum H; FR-18 only) — §11 confirms “recover malformed bodies only when normalized parser results agree; fail unreadable package/spine data or parser disagreement.” Addendum H restates equal-IR recovery and atomic failure. No FR states those outcomes; FR-18 only covers primary/fallback *parity*. Story writers can treat recovery as architecture trivia. *Fix:* Add an FR (the missing FR-7 slot is available) with consequences for agree-and-recover vs disagree-and-emit-no-file.
+- **medium** “Usable” navigation source is undefined (§4.2 FR-5) — “A usable EPUB navigation document takes precedence when present.” Empty nav, nav with zero content refs, or nav whose targets are all missing is unspecified. *Fix:* Define usable (e.g. at least one entry with a resolvable content document) and when to fall through to NCX/headings.
+- **medium** Image alt vs image omission (§4.3 FR-11 vs §4.4 FR-16) — FR-11: “Image and media elements are absent.” FR-16: “Source language, text direction, image alternative text, and page-break semantics are preserved where available.” After omit-images, preserving alt is either a silent `img`→text replacement or dead text. *Fix:* Delete image-alt from FR-16, or specify a replacement (e.g. insert alt as a visible caption before dropping the element) and report it as a fallback in FR-3.
+- **medium** “Interactively usable” and unnamed corpus (NFR-5; §9.1) — NFR-5: “no separate performance SLA beyond successful conversion and an interactively usable Reader Artifact on the agreed test corpus.” §9.1 only says the corpus “spann[s] a clean deep-TOC book, a structurally rich book, and a no-navigation book.” *Fix:* Point NFR-5/SM-4 at addendum F fixture classes, and replace “interactively usable” with checks already in SM-4 (open, no console errors, keyboard/search/print).
+- **low** Slug and rail mapping unspecified (FR-2, FR-14) — FR-2: “`<slugified-title>.html`” with no Unicode/empty-title rule. FR-14: “deterministic visual weight proportional to chapter word count” without a mapping (linear vs clamped log). *Fix:* One slug algorithm (including missing title) and one rail formula in the FR or addendum.
+
+## Scope honesty — strong
+Omissions do real work. Non-users (§2.2), Non-Goals (§8), and Out of Scope for MVP (§9.2) cover pagination, editing, DRM, pixel-identical CSS, fixed-layout fidelity, multimedia, remote fetch, per-book themes, and public APIs. Image/media omission is explicit in FR-11 and restated in §11, not silently inferred. Trusted-source de-scope is explicit in NFR-2 (“does not require adversarial… defenses”). Open-item density is appropriately low for a green-light-to-build internal tool: §11 and §12 claim no remaining blockers. Inline `[ASSUMPTION]` / `[NOTE FOR PM]` / `[NON-GOAL for MVP]` tags are unused because the equivalent work is in numbered sections—not a gap at these stakes.
+
+The honesty leak is residual pre-decision language: Glossary “supported embedded resources,” FR-16 image alt, and `.memlog.md` still listing image-embedding and hostile-input limits as unconfirmed assumptions after later overrides. The PRD body has moved; the index/log have not fully caught up.
+
+### Findings
+- **medium** Glossary still implies embeddable resources (§3 Source Content vs FR-11 / §8) — Source Content is “Book-authored text, semantics, identifiers, links, and supported embedded resources extracted from the EPUB Input.” After “The Converter removes images, multimedia…,” “supported embedded resources” reads as in-scope embedding. *Fix:* Redefine Source Content as text/semantics/identifiers/links only, or name the empty set of embeddable resources in MVP.
+- **low** §12 vs memlog drift (§12; `.memlog.md`) — PRD: “No unresolved assumptions remain.” Memlog still has “needs confirmation” lines for image embedding, hostile-input limits, and non-linear inclusion, which later memlog decisions and PRD §11 contradict. Does not block the PRD if readers trust §12, but PM hygiene is wrong. *Fix:* Close or strike those memlog assumption bullets to match §11/§12.
+
+## Downstream usability — adequate
+This PRD is chain-top (feeds UX, architecture, implementation). Extraction mostly works: Glossary terms are used as IDs in FRs; UJ-1 has a named protagonist (Nora) with inline context; SM-n → FR-n cross-refs resolve to existing FRs; addendum holds tokens, CLI, IR/serializer, and fixture classes so the PRD stays a capability spec. Sections can be pulled with Glossary nouns rather than “see above.”
+
+Friction for downstream: IDs skip FR-7 (almost certainly the deleted image-embed FR), which will confuse traceability spreadsheets. Glossary “supported embedded resources” and FR-16 image alt will be copy-pasted into stories as if images were in. “Supported EPUB” is circular (“an EPUB Input the MVP can convert without an unsupported protection or content condition, as bounded by this PRD”), so SM-1/SM-2 “100% of Supported EPUB fixtures” needs the addendum F list to be operational. FR-2’s “host’s designated downloadable output location” vs addendum B’s `/mnt/user-data/outputs/` is an architecture detail correctly parked, but UX/eval writers need one sentence that the path is host-defined.
+
+### Findings
+- **medium** FR ID gap (§4) — FRs run FR-1…FR-6 then FR-8…FR-18. No FR-7. SMs never cite FR-7, so it is a hole, not a dangling ref. *Fix:* Renumber, or reuse FR-7 for the parser-agreement/atomic-failure FR noted under Done-ness.
+- **medium** Circular Supported EPUB (§3; SM-1–SM-3) — Definition depends on “this PRD” without a closed inclusion list. Metrics at 100% of “Supported EPUB fixtures” are only testable once fixtures exist. *Fix:* One sentence pointing at addendum F classes plus “fixtures that are not protected, not parser-disagreeing, and not structurally unreadable.”
+- **low** Dual output-path wording (FR-2; addendum B) — FR-2: “host’s designated downloadable output location”; addendum: `emit /mnt/user-data/outputs/<slugified-title>.html`. Fine split if architecture owns it; eval authors may hard-code the Claude path. *Fix:* PRD keeps host-defined; addendum labels `/mnt/user-data/outputs/` as the current host example.
+
+## Shape fit — strong
+Matches an internal, single-operator conversion skill. One UJ is load-bearing enough for chat+offline read and is not consumer-app theater. Success metrics are operational (digests, link resolution, console errors, path governance), which is the right SM shape. Aesthetic guardrails (§6) plus addendum tokens give UX a source without turning the PRD into a mock. Chain-top rigor is present (stable IDs, glossary, addendum for implementation) without over-formalizing a 12-journey map. Brownfield note is accurate: `src/epub-html/scripts/template.html` is “authoritative design input, not a disposable prototype” (§0, FR-12). Not forced into a B2B multi-stakeholder shape.
+
+### Findings
+- None.
+
+## Mechanical notes
+- **ID continuity:** FR-7 missing; remaining FR and SM IDs unique; SM citations (FR-3, 4, 5, 6, 8–18, NFR-4, NFR-6) resolve. No UJ-2+.
+- **Glossary drift:** “chapter count” (Title Block, FR-8) vs “Spine Document count” (FR-3)—aligned if included spine occurrences = chapters, but the two names will fork. “language direction” (FR-8) vs “text direction” (FR-16). “supported embedded resources” vs omit-images. Book Rail is defined as belonging to the Navigation Tree (§3) which matches FR-14.
+- **Assumptions Index roundtrip:** No inline `[ASSUMPTION]` tags; §12 empty is consistent with the PRD body. Memlog still lists open assumptions that later decisions closed (embed raster/SVG; configurable hostile-input limits; non-linear inclusion “needs confirmation”)—index/log mismatch, not an inline/index mismatch inside the PRD.
+- **UJ protagonist:** UJ-1 names Nora and carries upload → summary → offline read → failure path inline.
+- **Memlog vs PRD (assumption/decision only):** (1) memlog “MVP embeds safe raster images…” contradicts FR-11, §8, addendum H “omit all images.” (2) memlog “Hostile-input archive and XML resource limits will be configurable” contradicts NFR-2 and the trusted-source override. (3) memlog non-linear inclusion “needs confirmation” contradicts §11 and addendum H (transitive include, visited set, first-occurrence warning).
+- **Required sections:** Vision, user, glossary, FRs, NFRs, non-goals, MVP, SMs with counters, open questions, assumptions index—all present for moderate-rigor internal tool. Design tokens correctly live in addendum D, not duplicated as a second product spec.
+- **Cross-doc:** §0 points at `docs/brief/html-epub-skill-brief.md` and `addendum.md`; addendum A tree matches NFR-6 / FR-12 path constraint.

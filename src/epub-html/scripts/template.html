@@ -1,0 +1,1025 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title data-slot="head-title">The Binding Copy — M. E. Voss</title>
+  <script>
+    (function () {
+      var key = "reader-theme";
+      var stored = null;
+      try { stored = localStorage.getItem(key); } catch (e) {}
+      var dark = stored ? stored === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+      document.documentElement.classList.toggle("dark", dark);
+    })();
+  </script>
+  <style>
+    :root {
+      --paper: #ECEEEA;
+      --ink: #1B1F1D;
+      --ink-soft: #5C645F;
+      --rule: #C9CEC6;
+      --accent: #46407F;
+      --sheet: #E3E6E1;
+      --scrim: color-mix(in srgb, #1B1F1D 42%, transparent);
+      --sidebar: 22rem;
+      --gutter: 1.5rem;
+      --header-h: 3.25rem;
+      --font-body: Charter, "Bitstream Charter", "Iowan Old Style", "Source Serif 4", Georgia, serif;
+      --font-ui: ui-sans-serif, system-ui, sans-serif;
+      --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", monospace;
+      --ease: 220ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    html.dark {
+      --paper: #15181A;
+      --sheet: #1C2124;
+      --ink: #DEE2DC;
+      --ink-soft: #8B948E;
+      --rule: #2C3235;
+      --accent: #9C93E8;
+      --scrim: color-mix(in srgb, #050607 58%, transparent);
+      color-scheme: dark;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    html {
+      scroll-behavior: smooth;
+      hanging-punctuation: first last;
+    }
+
+    html.sheet-open,
+    html.sheet-open body {
+      overflow: hidden;
+      overscroll-behavior: none;
+    }
+
+    html.sheet-open body {
+      position: fixed;
+      left: 0;
+      right: 0;
+      width: 100%;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--font-body);
+      font-size: 1.125rem;
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Laid-paper grain — behind type, no network. */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.28;
+      mix-blend-mode: multiply;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.12  0 0 0 0 0.14  0 0 0 0 0.12  0 0 0 0.55 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    }
+
+    html.dark body::before {
+      opacity: 0.18;
+      mix-blend-mode: overlay;
+    }
+
+    ::selection {
+      background: color-mix(in srgb, var(--accent) 28%, var(--paper));
+      color: var(--ink);
+    }
+
+    a { color: var(--accent); text-underline-offset: 0.18em; }
+    a:hover { text-decoration-thickness: 2px; }
+
+    :focus { outline: none; }
+    :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+    }
+
+    .skip {
+      position: absolute;
+      left: 0.75rem;
+      top: -3rem;
+      z-index: 60;
+      padding: 0.4rem 0.7rem;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--font-ui);
+      font-size: 0.8125rem;
+    }
+    .skip:focus { top: 0.75rem; }
+
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    /* —— Contents sheet —— */
+    .sidebar {
+      position: fixed;
+      inset: 0 auto 0 0;
+      width: min(var(--sidebar), calc(100vw - 2.5rem));
+      display: flex;
+      flex-direction: column;
+      background: var(--sheet);
+      z-index: 50;
+      transform: translateX(-100%);
+      visibility: hidden;
+      pointer-events: none;
+      transition: transform var(--ease), visibility var(--ease);
+      border-right: 1px solid var(--rule);
+      overscroll-behavior: contain;
+      touch-action: pan-y;
+    }
+
+    .sidebar.is-open {
+      transform: translateX(0);
+      visibility: visible;
+      pointer-events: auto;
+    }
+
+    .sidebar-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding: 1.15rem 1rem 1rem 1.35rem;
+      border-bottom: 1px solid var(--rule);
+      flex: 0 0 auto;
+    }
+
+    .sheet-kicker {
+      margin: 0 0 0.45rem;
+      font-family: var(--font-mono);
+      font-size: 0.625rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+    }
+
+    .sidebar-head-copy { min-width: 0; }
+
+    .sidebar-title {
+      margin: 0;
+      font-family: var(--font-body);
+      font-size: 1rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      line-height: 1.3;
+    }
+
+    .sidebar-author {
+      margin: 0.2rem 0 0;
+      font-family: var(--font-ui);
+      font-size: 0.8125rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+    }
+
+    .sidebar-body {
+      flex: 1 1 auto;
+      overflow: auto;
+      padding: 0.75rem 0 1rem;
+    }
+
+    .toc {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    .toc a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .toc-front > a {
+      display: block;
+      padding: 0.55rem 1.35rem 0.8rem;
+      font-family: var(--font-ui);
+      font-size: 0.8125rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+    }
+
+    .toc-front.is-active > a,
+    .toc-ch.is-current .toc-label,
+    .toc-sub a[aria-current="location"] { color: var(--accent); }
+
+    .toc-ch > a {
+      display: grid;
+      grid-template-columns: 0.35rem minmax(0, 1fr);
+      gap: 0.65rem;
+      padding: 0.45rem 1.35rem;
+      border-left: 2px solid transparent;
+    }
+
+    .toc-ch.is-current > a {
+      border-left-color: var(--accent);
+    }
+
+    .toc a:hover { color: var(--accent); }
+
+    .toc-meta {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 0.2rem 0;
+      min-width: 0;
+    }
+
+    /* The Book Rail is populated from each chapter's real word count. */
+    .book-rail {
+      align-self: stretch;
+      min-height: 0.85rem;
+      margin: 0.12rem 0;
+      background: var(--rule);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .book-rail::after {
+      content: "";
+      display: block;
+      width: 100%;
+      height: var(--rail-progress, 0%);
+      background: var(--accent);
+      transition: height var(--ease);
+    }
+
+    .toc-ch.is-current .book-rail { background: color-mix(in srgb, var(--accent) 35%, var(--rule)); }
+
+    .toc-num {
+      font-family: var(--font-mono);
+      font-size: 0.625rem;
+      letter-spacing: 0.08em;
+      color: var(--ink-soft);
+    }
+
+    .toc-label {
+      font-family: var(--font-ui);
+      font-size: 0.8125rem;
+      letter-spacing: 0.01em;
+      line-height: 1.3;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .toc-sub {
+      list-style: none;
+      margin: 0;
+      padding: 0 1.35rem 0.45rem 1.85rem;
+    }
+
+    .toc-sub a {
+      display: block;
+      padding: 0.2rem 0;
+      font-family: var(--font-ui);
+      font-size: 0.75rem;
+      color: var(--ink-soft);
+      letter-spacing: 0.02em;
+    }
+
+    .sidebar-foot {
+      flex: 0 0 auto;
+      padding: 0.65rem 1.1rem 0.9rem;
+      border-top: 1px solid var(--rule);
+    }
+
+    .theme-toggle {
+      appearance: none;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+      margin: 0;
+      padding: 0.45rem 0.35rem;
+      border: 0;
+      background: transparent;
+      color: var(--ink-soft);
+      font-family: var(--font-ui);
+      font-size: 0.8125rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .theme-toggle:hover { color: var(--ink); }
+
+    .theme-toggle svg {
+      width: 1rem;
+      height: 1rem;
+      flex: 0 0 auto;
+    }
+
+    /* —— Reader chrome —— */
+    .topbar {
+      display: flex;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: var(--header-h);
+      align-items: center;
+      gap: 1rem;
+      padding: 0 1.15rem;
+      background: color-mix(in srgb, var(--paper) 86%, transparent);
+      backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--rule);
+      z-index: 30;
+    }
+
+    .menu-btn,
+    .sheet-close {
+      appearance: none;
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0;
+      border: 0;
+      background: transparent;
+      color: var(--ink-soft);
+      cursor: pointer;
+      font-family: var(--font-ui);
+      font-size: 0.6875rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      line-height: 1;
+    }
+
+    .menu-btn {
+      height: var(--header-h);
+      padding: 0;
+    }
+
+    .sheet-close {
+      width: 2rem;
+      height: 2rem;
+      padding: 0;
+      border: 1px solid var(--rule);
+      border-radius: 999px;
+      font-size: 0;
+      letter-spacing: 0;
+      text-transform: none;
+      line-height: 0;
+    }
+
+    .sheet-close svg {
+      display: block;
+      width: 0.75rem;
+      height: 0.75rem;
+    }
+
+    .menu-btn:hover,
+    .sheet-close:hover { color: var(--ink); }
+
+    .topbar-title {
+      margin: 0;
+      font-family: var(--font-body);
+      font-size: 0.95rem;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .scrim {
+      position: fixed;
+      inset: 0;
+      background: var(--scrim);
+      z-index: 40;
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      touch-action: none;
+      transition: opacity var(--ease), visibility var(--ease);
+    }
+
+    .scrim.is-open {
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
+    }
+
+    /* —— Reading column —— */
+    .page {
+      min-height: 100vh;
+      position: relative;
+      z-index: 1;
+    }
+
+    main {
+      max-width: calc(68ch + 4rem);
+      margin: 0 auto;
+      padding: calc(var(--header-h) + 1.5rem) 2rem 8rem;
+    }
+
+    .title-block {
+      min-height: calc(100vh - var(--header-h));
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 2.5rem 0 3.5rem;
+    }
+
+    .title-block h1 {
+      margin: 0;
+      font-size: 2.5rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      max-width: 16ch;
+    }
+
+    .title-author {
+      margin: 1rem 0 0;
+      font-family: var(--font-ui);
+      font-size: 0.9375rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+    }
+
+    .title-facts {
+      margin: 1.75rem 0 0;
+      padding-bottom: 1.75rem;
+      border-bottom: 1px solid var(--rule);
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      letter-spacing: 0.04em;
+      color: var(--ink-soft);
+    }
+
+    .reader-chapter {
+      padding: 3.25rem 0 1rem;
+    }
+
+    .reader-chapter .chapter-kicker {
+      margin: 0 0 0.45rem;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      letter-spacing: 0.12em;
+      color: var(--ink-soft);
+    }
+
+    .reader-chapter > h2 {
+      margin: 0 0 1.75rem;
+      font-size: 1.75rem;
+      font-weight: 600;
+      letter-spacing: -0.015em;
+      line-height: 1.2;
+    }
+
+    /* Source heading levels are intentionally preserved. */
+    .reader-chapter h1 { margin: 0 0 1.75rem; font-size: 1.9rem; line-height: 1.2; }
+    .reader-chapter h2 { margin: 2.6rem 0 1.1rem; font-size: 1.45rem; line-height: 1.25; }
+
+    .reader-chapter h3 {
+      margin: 2.4rem 0 0.9rem;
+      font-size: 1.15rem;
+      font-weight: 600;
+    }
+
+    .reader-chapter p { margin: 0 0 1.05em; max-width: 68ch; }
+    .reader-chapter p:last-child { margin-bottom: 0; }
+
+    .reader-chapter blockquote {
+      margin: 1.5rem 0 1.5rem 0;
+      padding: 0.2rem 0 0.2rem 1.15rem;
+      border-left: 1px solid var(--accent);
+      color: var(--ink-soft);
+      max-width: 68ch;
+    }
+
+    .reader-chapter blockquote p { margin-bottom: 0.6em; }
+
+    .reader-chapter ul, .reader-chapter ol {
+      margin: 0 0 1.2em;
+      padding-left: 1.25rem;
+      max-width: 68ch;
+    }
+
+    .reader-chapter li { margin: 0.25em 0; }
+
+    .reader-chapter table {
+      width: 100%;
+      max-width: 68ch;
+      border-collapse: collapse;
+      margin: 1.5rem 0;
+      font-size: 0.95rem;
+    }
+
+    .reader-chapter th, .reader-chapter td {
+      text-align: left;
+      padding: 0.45rem 0.6rem 0.45rem 0;
+      border-bottom: 1px solid var(--rule);
+      vertical-align: top;
+    }
+
+    .reader-chapter th {
+      font-family: var(--font-ui);
+      font-size: 0.75rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      font-weight: 500;
+      color: var(--ink-soft);
+    }
+
+    .footnotes {
+      margin-top: 3rem;
+      padding-top: 1.25rem;
+      border-top: 1px solid var(--rule);
+      max-width: 68ch;
+      font-size: 0.95rem;
+      color: var(--ink-soft);
+    }
+
+    .footnotes ol { padding-left: 1.15rem; }
+    .fn-ref { font-size: 0.75em; }
+
+    @media (max-width: 899px) {
+      main {
+        padding: calc(var(--header-h) + 1rem) 1rem 6rem;
+        max-width: none;
+      }
+      .title-block { padding-top: 2rem; }
+      .title-block h1 { font-size: 2rem; }
+    }
+
+    @media print {
+      body::before, .sidebar, .topbar, .scrim, .skip, .sheet-close { display: none !important; }
+      .page { margin: 0; }
+      main { max-width: none; padding: 0; }
+      .title-block { min-height: 0; padding: 0 0 2rem; }
+      .reader-chapter { break-before: page; padding-top: 0; }
+      .reader-chapter:first-of-type { break-before: auto; }
+      a { color: inherit; text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to text</a>
+
+  <header class="topbar">
+    <button class="menu-btn" type="button" aria-controls="sidebar" aria-expanded="false" aria-haspopup="dialog" data-menu>Contents</button>
+    <p class="topbar-title" data-slot="title">The Binding Copy</p>
+  </header>
+  <div class="scrim" data-scrim hidden></div>
+
+  <aside class="sidebar" id="sidebar" role="dialog" aria-modal="true" aria-labelledby="sheet-title" inert>
+    <div class="sidebar-head">
+      <div class="sidebar-head-copy">
+        <p class="sheet-kicker">Contents</p>
+        <p class="sidebar-title" id="sheet-title" data-slot="title">The Binding Copy</p>
+        <p class="sidebar-author" data-slot="author">M. E. Voss</p>
+      </div>
+      <button class="sheet-close" type="button" data-sheet-close aria-label="Close contents">
+        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="square" aria-hidden="true">
+          <path d="M2 2l8 8M10 2L2 10"/>
+        </svg>
+      </button>
+    </div>
+    <nav class="sidebar-body" aria-label="Contents">
+      <ol class="toc" data-slot="toc">
+        <li class="toc-front" data-target="title">
+          <a href="#title">Title</a>
+        </li>
+        <li class="toc-ch" data-target="ch-01" data-words="345">
+          <a href="#ch-01">
+            <span class="book-rail" aria-hidden="true"></span>
+            <span class="toc-meta">
+              <span class="toc-num">01</span>
+              <span class="toc-label">The Uncut Signature</span>
+            </span>
+          </a>
+          <ol class="toc-sub">
+            <li><a href="#ch-01-h2">The knife and the grain</a></li>
+          </ol>
+        </li>
+        <li class="toc-ch" data-target="ch-02" data-words="811">
+          <a href="#ch-02">
+            <span class="book-rail" aria-hidden="true"></span>
+            <span class="toc-meta">
+              <span class="toc-num">02</span>
+              <span class="toc-label">A Catalogue of Unread Light</span>
+            </span>
+          </a>
+        </li>
+        <li class="toc-ch" data-target="ch-03" data-words="96">
+          <a href="#ch-03">
+            <span class="book-rail" aria-hidden="true"></span>
+            <span class="toc-meta">
+              <span class="toc-num">03</span>
+              <span class="toc-label">Night Desk</span>
+            </span>
+          </a>
+        </li>
+        <li class="toc-ch" data-target="ch-04" data-words="472">
+          <a href="#ch-04">
+            <span class="book-rail" aria-hidden="true"></span>
+            <span class="toc-meta">
+              <span class="toc-num">04</span>
+              <span class="toc-label">Margins, Tables, Notes</span>
+            </span>
+          </a>
+        </li>
+        <li class="toc-ch" data-target="ch-05" data-words="389">
+          <a href="#ch-05">
+            <span class="book-rail" aria-hidden="true"></span>
+            <span class="toc-meta">
+              <span class="toc-num">05</span>
+              <span class="toc-label">The Last Gathering</span>
+            </span>
+          </a>
+        </li>
+      </ol>
+      <template id="toc-chapter-template">
+        <li class="toc-ch" data-target="">
+          <a href="#"><span class="book-rail" aria-hidden="true"></span><span class="toc-meta"><span class="toc-num"></span><span class="toc-label"></span></span></a>
+          <ol class="toc-sub"></ol>
+        </li>
+      </template>
+      <template id="toc-subitem-template"><li><a href="#"></a></li></template>
+    </nav>
+    <div class="sidebar-foot">
+      <button class="theme-toggle" type="button" data-theme-toggle>
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" aria-hidden="true">
+          <path d="M8 1.5a6.5 6.5 0 1 0 6.2 8.4A5.2 5.2 0 0 1 8 1.5z"/>
+        </svg>
+        <span data-theme-label>Dark</span>
+      </button>
+    </div>
+  </aside>
+
+  <div class="page">
+    <main id="main">
+      <header class="title-block" id="title">
+        <h1 data-slot="title">The Binding Copy</h1>
+        <p class="title-author" data-slot="author">M. E. Voss</p>
+        <p class="title-facts" data-slot="facts">5 chapters · — words · — min</p>
+      </header>
+
+      <article data-slot="chapters">
+        <section class="reader-chapter" id="ch-01" data-words="345">
+          <p class="chapter-kicker">01</p>
+          <h2>The Uncut Signature</h2>
+          <p>They kept one copy of every book unbound. Not as a curiosity and not as a spare: as a working surface. The bound editions went to the public rooms, where they could be held and returned. The binding copy stayed in the long gallery behind the issue desk, a stack of folded sheets still waiting for thread, so that anyone who needed the whole of a text at once could spread it on the table and see the argument as a single field.</p>
+          <p>Readers hated it at first. A book without a cover feels unfinished, even slightly indecent, like a letter opened in the wrong room. Then the habit took. You could stand at the gallery table and put a finger on the preface and another on the last appendix and know, without turning anything, how far apart they were. Distance became visible. Weight became a length of paper.</p>
+          <p>The librarian who kept the gallery — she was never named in the annual report, only as <em>binding copy, care of</em> — said the point was not convenience. Bound books make you travel. Unbound ones make you choose a place to stand.</p>
+          <h3 id="ch-01-h2">The knife and the grain</h3>
+          <p>Signatures arrived from the printer still closed along the fore-edge. She opened them with a bone folder, never a knife if she could help it. A knife is honest but it shines; it leaves a story about the opening. The folder only insisted. The paper remembered the pressure as a dull line, which was all a working copy was allowed to remember.</p>
+          <p>On wet mornings the laid lines rose a little, a faint ribbing you could see when the north windows were doing their colourless work. She liked those mornings. The sheets looked like what they were: rag and daylight, not a stage for type.</p>
+        </section>
+
+        <section class="reader-chapter" id="ch-02" data-words="811">
+          <p class="chapter-kicker">02</p>
+          <h2>A Catalogue of Unread Light</h2>
+          <p>The gallery was catalogued twice. The public ledger listed titles, authors, dates, the usual bones. The private ledger listed <strong>lengths</strong>. Not pages — pages lie once a designer has been at them — but words, counted by a clerk who had been told that estimation was a kind of theft. A short treatise and a fat novel could occupy the same shelf-inch in the bound rooms. In the gallery they could not. The stacks rose and fell like a coastline.</p>
+          <p>Visitors who were allowed through (scholars, mostly, and one compositor who came on Thursdays) learned to read the stacks before they read the texts. A valley meant a pamphlet war. A long even ridge meant a Victorian three-decker that had been collapsed back into sheets, the original arrogance of volume still faintly there in the way the paper wanted to sit in threes.</p>
+          <p>She walked the aisle each evening with a lamp that was not supposed to be used in the gallery. Rules about flame were older than the collection. She used it anyway, because the electric sconces flattened the laid grain into a single cheap colour, and she needed to see whether a stack had slumped. Paper slumps in a particular way when it has taken damp: not a lean but a softening of the edges, as if the text had begun to think about returning to pulp.</p>
+          <p>There was a year when the river came up as far as the coal hatch. They moved the binding copies to the reading-room tables and the bound books into the cellar, which looked like a joke until you understood the arithmetic. A bound book can be dried and pressed and still be a book. A stack of sheets, once stuck, is a brick with a title.</p>
+          <p>The compositor asked her once whether she ever read them. She said she read the <em>lengths</em>. He thought she was being clever. She was not. After enough years the number of words in a thing is a kind of weather. You feel a three-thousand-word preface coming the way you feel a change in pressure. You know a middle chapter that has gone on too long the way you know a guest who will not stand up to leave.</p>
+          <p>He brought her a specimen of a new face they were cutting in the city: a roman with a slightly too-small bowl on the a, which would make cheap paper look busier than it was. She told him to keep it out of the gallery. The gallery was not a place for faces that performed. Type here had one job, which was to lie down and be counted.</p>
+          <p>Still, she kept a few pages of that specimen under a weight, because even a wrong a is information. On winter afternoons, when the north light went early, she would take them out and look at the trouble in the counter of the letter, the way a river looks at a poorly built bridge. Then she would put them back and return to the stacks, where the only drama was how much of a book was left below your hand.</p>
+          <p>That, she had decided, was the whole of librarianship that interested her. Not the issuing. Not the fines. The issuing was a courtesy extended to people who still believed a book was an object you finish. She preferred the people who came to stand, who wanted the argument laid out like a map, who would say, without embarrassment, <em>show me where the long part is</em>.</p>
+        </section>
+
+        <section class="reader-chapter" id="ch-03" data-words="96">
+          <p class="chapter-kicker">03</p>
+          <h2>Night Desk</h2>
+          <p>After closing she sat at the issue desk in the dark and listened to the building settle. The gallery ticked as the paper gave back the day’s warmth. Somewhere a bound copy, jealous, dropped a grain of glue. She wrote nothing. The night was for letting the lengths rearrange themselves behind her eyes, a slow parade of spines that were not spines yet, only measures of how much had been said.</p>
+        </section>
+
+        <section class="reader-chapter" id="ch-04" data-words="472">
+          <p class="chapter-kicker">04</p>
+          <h2>Margins, Tables, Notes</h2>
+          <p>The private ledger was not literature, and she refused to pretend it was. It was a table, and tables are how you keep a gallery from becoming a mood.<a class="fn-ref" id="ch-04-ref1" href="#ch-04-note1">1</a></p>
+          <blockquote>
+            <p>A binding copy is a book that has agreed, temporarily, to be a landscape. Treat it as a landscape: survey it, mark the rivers, do not put a road through the middle because the road would be prettier.</p>
+          </blockquote>
+          <p>She taught the Thursday compositor to read the ledger the way he already knew how to read a forme: not for sentences, for distribution.</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Shelf</th>
+                <th>Kind</th>
+                <th>Words</th>
+                <th>Note</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>A</td>
+                <td>Treatises</td>
+                <td>12–40 thousand</td>
+                <td>Keep dry; boards warp first</td>
+              </tr>
+              <tr>
+                <td>B</td>
+                <td>Narratives</td>
+                <td>80–140 thousand</td>
+                <td>Long middles; check slump</td>
+              </tr>
+              <tr>
+                <td>C</td>
+                <td>Pamphlets</td>
+                <td>under 8 thousand</td>
+                <td>Bundle in tens, never in scores</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>He wanted headings, rules, a little ornament at the foot of the page. She gave him a rule and nothing else. Ornament, she said, is what you add when you do not trust the information.<a class="fn-ref" id="ch-04-ref2" href="#ch-04-note2">2</a></p>
+          <aside class="footnotes">
+            <ol>
+              <li id="ch-04-note1">The public catalogue used pages. She crossed them out in pencil whenever she found them, which was often. <a href="#ch-04-ref1">↩</a></li>
+              <li id="ch-04-note2">He did, eventually, trust it. The specimen with the bad a remained under the weight. <a href="#ch-04-ref2">↩</a></li>
+            </ol>
+          </aside>
+        </section>
+
+        <section class="reader-chapter" id="ch-05" data-words="389">
+          <p class="chapter-kicker">05</p>
+          <h2>The Last Gathering</h2>
+          <p>They closed the gallery in a year that is not important. The bound rooms needed the space for terminals. The sheets were gathered at last, sewn, cased, and sent downstairs to live as ordinary books, which is a respectable fate and also a kind of forgetting.</p>
+          <p>She stayed for the gathering. Watching a landscape become an object again is not tragic, only precise. The long middle of the unread novel, which had been a ridge you could measure with a glance, disappeared into boards and a spine stamp. You would have to travel again to find out where you were.</p>
+          <p>On the last evening she stood in the empty aisle and held her hands apart, the width of a vanished stack, as if the air had agreed to remember. Then she put her hands in her coat and went out by the coal hatch, because the front steps were being rebuilt and she had never liked a ceremony.</p>
+          <p>What remains is the habit, which is transferable. You can still take a book apart, if you are allowed. You can still lay it out. You can still ask, before you commit to the journey, how large the country is, and how long the walking. The rest is furniture: lamps, boards, the little theatre of a cover. The work is the length, and the choosing of a place to stand in it.</p>
+        </section>
+      </article>
+      <template id="chapter-template"><section class="reader-chapter" id=""><p class="chapter-kicker"></p><div data-slot="chapter-content"></div></section></template>
+    </main>
+  </div>
+
+  <script>
+    (function () {
+      var THEME_KEY = "reader-theme";
+      var root = document.documentElement;
+      var chapters = Array.prototype.slice.call(document.querySelectorAll(".reader-chapter"));
+      var tocCh = Array.prototype.slice.call(document.querySelectorAll(".toc-ch"));
+      var tocFront = document.querySelector(".toc-front");
+      var facts = document.querySelector('[data-slot="facts"]');
+      var toggle = document.querySelector("[data-theme-toggle]");
+      var toggleLabel = document.querySelector("[data-theme-label]");
+      var menuBtn = document.querySelector("[data-menu]");
+      var closeBtn = document.querySelector("[data-sheet-close]");
+      var sidebar = document.getElementById("sidebar");
+      var scrim = document.querySelector("[data-scrim]");
+      var page = document.querySelector(".page");
+      var topbar = document.querySelector(".topbar");
+      var skip = document.querySelector(".skip");
+      var lastFocus = null;
+      var lockedScrollY = 0;
+
+      function wordCount(el) {
+        return (el.innerText || "").trim().split(/\s+/).filter(Boolean).length;
+      }
+
+      function setTheme(dark, persist) {
+        root.classList.toggle("dark", dark);
+        if (toggleLabel) toggleLabel.textContent = dark ? "Light" : "Dark";
+        if (toggle) toggle.setAttribute("aria-pressed", dark ? "true" : "false");
+        if (persist) {
+          try { localStorage.setItem(THEME_KEY, dark ? "dark" : "light"); } catch (e) {}
+        }
+      }
+
+      setTheme(root.classList.contains("dark"), false);
+
+      if (toggle) {
+        toggle.addEventListener("click", function () {
+          setTheme(!root.classList.contains("dark"), true);
+        });
+      }
+
+      function isTypingTarget(t) {
+        var tag = t && t.tagName;
+        return tag === "INPUT" || tag === "TEXTAREA" || (t && t.isContentEditable);
+      }
+
+      function isNavOpen() {
+        return !!(sidebar && sidebar.classList.contains("is-open"));
+      }
+
+      function sheetFocusables() {
+        if (!sidebar) return [];
+        return Array.prototype.slice.call(
+          sidebar.querySelectorAll('a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])')
+        ).filter(function (el) {
+          return el.offsetParent !== null || el === document.activeElement;
+        });
+      }
+
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && isNavOpen()) {
+          e.preventDefault();
+          closeNav();
+          return;
+        }
+        if (e.key === "Tab" && isNavOpen()) {
+          var nodes = sheetFocusables();
+          if (!nodes.length) return;
+          var first = nodes[0];
+          var last = nodes[nodes.length - 1];
+          if (e.shiftKey && document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+          return;
+        }
+        if (isTypingTarget(e.target)) return;
+        if (e.key === "d" || e.key === "D") {
+          e.preventDefault();
+          setTheme(!root.classList.contains("dark"), true);
+        }
+        if (e.key === "c" || e.key === "C") {
+          e.preventDefault();
+          if (isNavOpen()) closeNav();
+          else openNav();
+        }
+      });
+
+      var totalWords = 0;
+      var largestChapter = 1;
+      chapters.forEach(function (ch) {
+        var declared = Number(ch.dataset.words);
+        var n = Number.isFinite(declared) && declared >= 0 ? declared : wordCount(ch);
+        totalWords += n;
+        largestChapter = Math.max(largestChapter, n);
+        if (!ch.dataset.words) ch.dataset.words = String(n);
+      });
+
+      tocCh.forEach(function (item, index) {
+        var rail = item.querySelector(".book-rail");
+        if (!rail) return;
+        var chapter = chapters[index];
+        var words = Number(item.dataset.words || (chapter && chapter.dataset.words) || 0);
+        rail.style.minHeight = Math.max(8, Math.round(8 + (words / largestChapter) * 32)) + "px";
+      });
+
+      if (facts && !facts.dataset.converterOwned) {
+        var mins = Math.max(1, Math.round(totalWords / 250));
+        facts.textContent = chapters.length + " chapters · " + totalWords.toLocaleString() + " words · " + mins + " min";
+      }
+
+      function setBackgroundInert(on) {
+        [page, topbar, skip].forEach(function (el) {
+          if (!el) return;
+          if (on) el.setAttribute("inert", "");
+          else el.removeAttribute("inert");
+        });
+      }
+
+      function lockPageScroll() {
+        lockedScrollY = window.scrollY || window.pageYOffset || 0;
+        root.classList.add("sheet-open");
+        document.body.style.top = "-" + lockedScrollY + "px";
+      }
+
+      function unlockPageScroll() {
+        root.classList.remove("sheet-open");
+        document.body.style.top = "";
+        window.scrollTo(0, lockedScrollY);
+      }
+
+      function isInSheet(node) {
+        return !!(sidebar && node && sidebar.contains(node));
+      }
+
+      function preventBackgroundScroll(e) {
+        if (!isNavOpen()) return;
+        if (isInSheet(e.target)) return;
+        e.preventDefault();
+      }
+
+      document.addEventListener("wheel", preventBackgroundScroll, { passive: false });
+      document.addEventListener("touchmove", preventBackgroundScroll, { passive: false });
+
+      function closeNav() {
+        if (!sidebar || !isNavOpen()) return;
+        sidebar.classList.remove("is-open");
+        sidebar.setAttribute("inert", "");
+        sidebar.setAttribute("aria-hidden", "true");
+        if (scrim) { scrim.classList.remove("is-open"); scrim.hidden = true; }
+        setBackgroundInert(false);
+        unlockPageScroll();
+        if (menuBtn) menuBtn.setAttribute("aria-expanded", "false");
+        if (lastFocus && typeof lastFocus.focus === "function") lastFocus.focus();
+      }
+
+      function openNav() {
+        if (!sidebar) return;
+        lastFocus = document.activeElement;
+        lockPageScroll();
+        sidebar.classList.add("is-open");
+        sidebar.removeAttribute("inert");
+        sidebar.removeAttribute("aria-hidden");
+        if (scrim) { scrim.hidden = false; scrim.classList.add("is-open"); }
+        setBackgroundInert(true);
+        if (menuBtn) menuBtn.setAttribute("aria-expanded", "true");
+        window.requestAnimationFrame(function () {
+          var target = closeBtn || sheetFocusables()[0] || sidebar;
+          if (target && typeof target.focus === "function") {
+            if (!target.hasAttribute("tabindex") && target === sidebar) target.setAttribute("tabindex", "-1");
+            target.focus();
+          }
+        });
+      }
+
+      if (sidebar) {
+        sidebar.setAttribute("aria-hidden", "true");
+      }
+
+      if (menuBtn) {
+        menuBtn.addEventListener("click", function () {
+          if (isNavOpen()) closeNav();
+          else openNav();
+        });
+      }
+      if (closeBtn) closeBtn.addEventListener("click", closeNav);
+      if (scrim) scrim.addEventListener("click", closeNav);
+
+      document.querySelectorAll('.toc a[href^="#"]').forEach(function (a) {
+        a.addEventListener("click", closeNav);
+      });
+
+      var currentIdx = -1;
+      var onTitle = true;
+
+      function paintCurrent() {
+        tocCh.forEach(function (item, i) {
+          var on = i === currentIdx && !onTitle;
+          item.classList.toggle("is-current", on);
+          var rail = item.querySelector(".book-rail");
+          if (rail) rail.style.setProperty("--rail-progress", on ? "100%" : "0%");
+          var link = item.querySelector(":scope > a");
+          if (link) {
+            if (on) link.setAttribute("aria-current", "location");
+            else link.removeAttribute("aria-current");
+          }
+        });
+        if (tocFront) {
+          tocFront.classList.toggle("is-active", onTitle);
+          var fl = tocFront.querySelector("a");
+          if (fl) {
+            if (onTitle) fl.setAttribute("aria-current", "location");
+            else fl.removeAttribute("aria-current");
+          }
+        }
+      }
+
+      if ("IntersectionObserver" in window) {
+        var spy = new IntersectionObserver(function (entries) {
+          entries.forEach(function (entry) {
+            if (!entry.isIntersecting) return;
+            if (entry.target.id === "title") {
+              onTitle = true;
+              currentIdx = -1;
+            } else {
+              onTitle = false;
+              currentIdx = chapters.indexOf(entry.target);
+            }
+            paintCurrent();
+          });
+        }, { rootMargin: "-22% 0px -62% 0px", threshold: 0 });
+        var titleEl = document.getElementById("title");
+        if (titleEl) spy.observe(titleEl);
+        chapters.forEach(function (ch) { spy.observe(ch); });
+      } else {
+        paintCurrent();
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "skill_assertions": [
+    {
+      "prompt": "I uploaded novel.epub. Make it a single HTML file I can read offline.",
+      "expects": ["triggers epub-to-single-page-html-reader", "runs parser auto", "delivers exactly one .html artifact", "reports conversion summary", "does not regenerate book prose"]
+    },
+    {
+      "prompt": "Convert this .epub and tell me if it omitted images or had no navigation.",
+      "expects": ["delivers one artifact", "renders warnings and omission counts from JSON"]
+    },
+    {
+      "prompt": "The EPUB is encrypted; convert whatever you can.",
+      "expects": ["plain failure wording", "no substitute or partial artifact"]
+    }
+  ],
+  "converter_assertions": [
+    "same input/template/configuration produces identical SHA-256 output",
+    "auto compares normalized parser representation when optional adapters are available",
+    "resource cleanup and remote-link omissions are counted",
+    "expected failures leave no output file",
+    "all retained local links resolve to a unique in-page anchor"
+  ]
+}

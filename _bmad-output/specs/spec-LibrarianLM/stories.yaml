@@ -1,0 +1,53 @@
+- id: "1"
+  title: Bootstrap the i18n package and shared kernel contracts
+  description: >-
+    Establish the locked package and kernel-owned contracts for identities, canonical
+    artifacts, compatibility, errors, lifecycle legality, and the orthogonal status vector required by CAP-6.
+  spec_checkpoint: true
+  done_checkpoint: true
+  invoke_dev_with: ""
+
+- id: "2"
+  title: Implement durable artifact state and recovery
+  description: >-
+    Implement the filesystem artifact store, immutable receipts, manifest compare-and-swap,
+    run locking, lifecycle transitions, and deterministic resume behavior supporting CAP-6.
+  spec_checkpoint: true
+  done_checkpoint: false
+  invoke_dev_with: ""
+
+- id: "3"
+  title: Prepare stable Source Units
+  description: >-
+    Implement CAP-1 for Canonical Source Package ingestion, ownership and eligibility classification,
+    deterministic segmentation, editorial applicability, Unit Manifest creation, and fixture signing.
+  spec_checkpoint: true
+  done_checkpoint: false
+  invoke_dev_with: ""
+
+- id: "4"
+  title: Preserve inline structure and assemble drafts
+  description: >-
+    Implement CAP-3 preparation and assembly mechanics for protected tokens, Inline Binding Maps,
+    exact placement, projection mapping, source cloning, and deterministic dummy round trips.
+  spec_checkpoint: false
+  done_checkpoint: false
+  invoke_dev_with: ""
+
+- id: "5"
+  title: Validate drafts and emit machine-truth reports
+  description: >-
+    Complete CAP-3 with independent structural, terminology, language, directionality,
+    accessibility, and completeness validation plus canonical Assembly, Validation, and Run reports.
+  spec_checkpoint: true
+  done_checkpoint: true
+  invoke_dev_with: ""
+
+- id: "6"
+  title: Expose fixture-mode workflows and orchestration
+  description: >-
+    Expose independently invocable Prepare and Assemble-and-Validate entrypoints and CAP-6 orchestration
+    for an automatic fixture-mode run with versioned handoffs, resumability, and actionable terminal outcomes.
+  spec_checkpoint: false
+  done_checkpoint: false
+  invoke_dev_with: ""
