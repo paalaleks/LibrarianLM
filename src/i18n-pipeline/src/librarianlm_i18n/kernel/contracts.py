@@ -16,6 +16,7 @@ from .identity import (
     SourceUnitId,
     TokenId,
 )
+from .errors import ActionableError, Retryability
 from .lifecycle import UnitLifecycleState
 
 __all__ = [
@@ -367,6 +368,7 @@ class OperationalReceipt(VersionedContract):
     """Append-only operational history, deliberately separate from content objects."""
 
     run_id: StrictStr = Field(min_length=1)
+    stage_id: StrictStr = Field(default="manifest-publication", min_length=1)
     attempt: StrictInt = Field(ge=1)
     attempt_ceiling: StrictInt = Field(ge=1)
     started_at: datetime
@@ -374,9 +376,11 @@ class OperationalReceipt(VersionedContract):
     outcome: OperationalOutcome
     retry_guidance: StrictStr = Field(min_length=1)
     lock_owner: LockOwner
-    manifest_link: ManifestLink
+    manifest_link: ManifestLink | None = None
     predecessor_receipt_digest: Sha256Digest | None = None
     findings: tuple[OperationalFinding, ...] = ()
+    failure: ActionableError | None = None
+    produced_artifact_digests: tuple[Sha256Digest, ...] = ()
 
     @model_validator(mode="after")
     def receipt_times_and_attempts_are_valid(self) -> "OperationalReceipt":
@@ -387,6 +391,28 @@ class OperationalReceipt(VersionedContract):
                 raise ValueError("receipt timestamps must be explicit UTC")
         if self.completed_at < self.started_at:
             raise ValueError("receipt completion cannot precede its start")
+        if len(set(self.produced_artifact_digests)) != len(self.produced_artifact_digests):
+            raise ValueError("produced artifact digests must be unique")
+        if self.outcome is OperationalOutcome.COMPLETED:
+            if self.manifest_link is None or self.failure is not None:
+                raise ValueError("completed receipts require a manifest link and no failure")
+            if self.manifest_link.predecessor_manifest_digest == self.manifest_link.successor_manifest_digest:
+                raise ValueError("completed receipts cannot link a manifest to itself")
+        elif self.outcome is OperationalOutcome.RETRYABLE_FAILURE:
+            if self.manifest_link is not None or self.failure is None:
+                raise ValueError("retryable failures require a failure and no manifest link")
+            if self.failure.retryability is not Retryability.RETRYABLE:
+                raise ValueError("retryable failures require a retryable error")
+        elif self.outcome is OperationalOutcome.TERMINAL_FAILURE:
+            if self.manifest_link is not None or self.failure is None:
+                raise ValueError("terminal failures require a failure and no manifest link")
+            if self.failure.retryability is not Retryability.NOT_RETRYABLE:
+                raise ValueError("terminal failures require a non-retryable error")
+        elif self.outcome is OperationalOutcome.RECONCILIATION_REQUIRED:
+            if self.manifest_link is not None or (self.failure is None and not self.findings):
+                raise ValueError("reconciliation receipts require findings or a failure and no manifest link")
+            if self.failure is not None and self.failure.retryability is not Retryability.NOT_RETRYABLE:
+                raise ValueError("reconciliation receipts require a non-retryable error")
         return self
 
 

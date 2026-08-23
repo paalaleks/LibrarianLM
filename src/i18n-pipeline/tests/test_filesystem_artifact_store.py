@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import socket
 import tempfile
 import unittest
@@ -7,8 +8,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
 
+from pydantic import BaseModel, ValidationError
+
 from librarianlm_i18n.adapters import FilesystemArtifactStore
 from librarianlm_i18n import kernel
+from librarianlm_i18n.ports import ObjectReadResult, ObjectWriteResult, OutcomeResult, PublicationResult, RecoveryResult
 
 
 DIGEST_A = "a" * 64
@@ -162,9 +166,10 @@ class FilesystemArtifactStoreTests(unittest.TestCase):
 
     def test_retry_history_is_strict_and_recovery_detects_hash_valid_rewrite(self) -> None:
         initial = self.store.publish_manifest("run-1", manifest(), expected_predecessor_digest=None, attempt=1, attempt_ceiling=3)
-        self.assertEqual(self.store.publish_manifest("run-1", manifest(previous=initial.reference.manifest_digest), expected_predecessor_digest=initial.reference.manifest_digest, attempt=1, attempt_ceiling=3).error.code, "retry-history-invalid")
-        self.assertEqual(self.store.publish_manifest("run-1", manifest(previous=initial.reference.manifest_digest), expected_predecessor_digest=initial.reference.manifest_digest, attempt=2, attempt_ceiling=2).error.code, "retry-history-invalid")
-        second = self.store.publish_manifest("run-1", manifest(previous=initial.reference.manifest_digest), expected_predecessor_digest=initial.reference.manifest_digest, attempt=2, attempt_ceiling=3)
+        successor = manifest(previous=initial.reference.manifest_digest, first=kernel.UnitLifecycleState.PROPOSED)
+        self.assertEqual(self.store.publish_manifest("run-1", successor, expected_predecessor_digest=initial.reference.manifest_digest, attempt=1, attempt_ceiling=3).error.code, "retry-history-invalid")
+        self.assertEqual(self.store.publish_manifest("run-1", successor, expected_predecessor_digest=initial.reference.manifest_digest, attempt=2, attempt_ceiling=2).error.code, "retry-history-invalid")
+        second = self.store.publish_manifest("run-1", successor, expected_predecessor_digest=initial.reference.manifest_digest, attempt=2, attempt_ceiling=3)
         self.assertIsNone(second.error)
         rewritten = second.receipt.model_copy(update={"attempt": 1})
         rewritten_digest = self.store._write_receipt("run-1", rewritten)
@@ -173,7 +178,8 @@ class FilesystemArtifactStoreTests(unittest.TestCase):
 
     def test_recovery_rejects_hash_valid_truncated_and_non_genesis_receipt_histories(self) -> None:
         initial = self.store.publish_manifest("run-1", manifest(), expected_predecessor_digest=None, attempt=1, attempt_ceiling=2)
-        second = self.store.publish_manifest("run-1", manifest(previous=initial.reference.manifest_digest), expected_predecessor_digest=initial.reference.manifest_digest, attempt=2, attempt_ceiling=2)
+        successor = manifest(previous=initial.reference.manifest_digest, first=kernel.UnitLifecycleState.PROPOSED)
+        second = self.store.publish_manifest("run-1", successor, expected_predecessor_digest=initial.reference.manifest_digest, attempt=2, attempt_ceiling=2)
         truncated = second.receipt.model_copy(update={"predecessor_receipt_digest": None})
         truncated_digest = self.store._write_receipt("run-1", truncated)
         self._replace_reference("run-1", second.reference.model_copy(update={"completion_receipt_digest": truncated_digest}))
@@ -212,3 +218,117 @@ class FilesystemArtifactStoreTests(unittest.TestCase):
             result = self.store.publish_manifest("run-1", manifest(), expected_predecessor_digest=None)
         self.assertEqual(result.error.code, "lock-contended")
         self.assertEqual(lock.read_bytes(), kernel.canonical_bytes(replacement))
+
+    def _retryable_error(self) -> kernel.ActionableError:
+        return kernel.ActionableError(
+            code="fixture-retry", workflow="fixture", subject="fixture", rule="fixture-rule",
+            expected="a retry", observed="failure", retryability=kernel.Retryability.RETRYABLE,
+            next_action="retry fixture",
+        )
+
+    def test_direct_current_successor_rejects_skips_mutations_and_inventory_changes(self) -> None:
+        base = self.store.publish_manifest("run-1", manifest(), expected_predecessor_digest=None, attempt=1, attempt_ceiling=4)
+        digest = base.reference.manifest_digest
+        skipped = manifest(previous=digest, first=kernel.UnitLifecycleState.EVALUATED)
+        self.assertEqual(self.store.publish_manifest("run-1", skipped, expected_predecessor_digest=digest, attempt=2, attempt_ceiling=4).error.code, "manifest-conflict")
+        changed = manifest(previous=digest, first=kernel.UnitLifecycleState.PROPOSED)
+        mutable_unit = changed.units[0].model_copy(update={"eligibility_reason": "rewritten"})
+        mutable = changed.model_copy(update={"units": (mutable_unit, changed.units[1])})
+        self.assertEqual(self.store.publish_manifest("run-1", mutable, expected_predecessor_digest=digest, attempt=2, attempt_ceiling=4).error.code, "manifest-conflict")
+        reordered = changed.model_copy(update={"units": tuple(reversed(changed.units))})
+        self.assertEqual(self.store.publish_manifest("run-1", reordered, expected_predecessor_digest=digest, attempt=2, attempt_ceiling=4).error.code, "manifest-conflict")
+        zero_advance = manifest().model_copy(update={"previous_manifest_digest": digest})
+        self.assertEqual(self.store.publish_manifest("run-1", zero_advance, expected_predecessor_digest=digest, attempt=2, attempt_ceiling=4).error.code, "manifest-conflict")
+
+    def test_failed_edge_requires_new_typed_failure_and_republication_is_idempotent(self) -> None:
+        base = self.store.publish_manifest("run-1", manifest(), expected_predecessor_digest=None, attempt=1, attempt_ceiling=3)
+        digest = base.reference.manifest_digest
+        invalid_failed = manifest(previous=digest, first=kernel.UnitLifecycleState.FAILED)
+        self.assertEqual(self.store.publish_manifest("run-1", invalid_failed, expected_predecessor_digest=digest, attempt=2, attempt_ceiling=3).error.code, "manifest-conflict")
+        failed_unit = invalid_failed.units[0].model_copy(update={
+            "failed_unit": kernel.ProvenanceReference(kind=kernel.ProvenanceKind.FAILED_UNIT, digest=DIGEST_B),
+        })
+        valid_failed = invalid_failed.model_copy(update={"units": (failed_unit, invalid_failed.units[1])})
+        published = self.store.publish_manifest("run-1", valid_failed, expected_predecessor_digest=digest, attempt=2, attempt_ceiling=3)
+        self.assertIsNone(published.error)
+        repeat = self.store.publish_manifest("run-1", valid_failed, expected_predecessor_digest=published.reference.manifest_digest, attempt=3, attempt_ceiling=3)
+        self.assertIsNone(repeat.error)
+        self.assertEqual(repeat.reference, published.reference)
+        self.assertEqual(repeat.receipt, published.receipt)
+        self.assertNotEqual(repeat.receipt.manifest_link.predecessor_manifest_digest, repeat.receipt.manifest_link.successor_manifest_digest)
+
+    def test_failed_attempts_append_before_completion_and_are_recovered(self) -> None:
+        recorded = self.store.record_outcome(
+            "run-1", stage_id="translate", outcome=kernel.OperationalOutcome.RETRYABLE_FAILURE,
+            attempt=1, attempt_ceiling=3, error=self._retryable_error(),
+            retry_guidance="retry after fixture repair", produced_artifact_digests=(DIGEST_A,),
+        )
+        self.assertIsNone(recorded.error)
+        reused = self.store.record_outcome(
+            "run-1", stage_id="translate", outcome=kernel.OperationalOutcome.RETRYABLE_FAILURE,
+            attempt=1, attempt_ceiling=3, error=self._retryable_error(), retry_guidance="retry",
+        )
+        self.assertEqual(reused.error.code, "retry-history-invalid")
+        completed = self.store.publish_manifest("run-1", manifest(), expected_predecessor_digest=None, attempt=2, attempt_ceiling=3)
+        self.assertIsNone(completed.error)
+        recovered = self.store.recover("run-1")
+        self.assertEqual(tuple(receipt.attempt for receipt in recovered.receipts), (2, 1))
+        self.assertEqual(recovered.receipts[1].outcome, kernel.OperationalOutcome.RETRYABLE_FAILURE)
+
+    def test_recovery_exposes_post_reference_failure_then_retry_without_advancing_manifest(self) -> None:
+        initial = self.store.publish_manifest("run-1", manifest(), expected_predecessor_digest=None, attempt=1, attempt_ceiling=3)
+        failure = self.store.record_outcome(
+            "run-1", stage_id="translate", outcome=kernel.OperationalOutcome.RETRYABLE_FAILURE,
+            attempt=2, attempt_ceiling=3, error=self._retryable_error(), retry_guidance="retry fixture",
+        )
+        self.assertIsNone(failure.error)
+        pending = self.store.recover("run-1")
+        self.assertEqual(pending.reference, initial.reference)
+        self.assertEqual(pending.manifest, manifest())
+        self.assertEqual(tuple(receipt.attempt for receipt in pending.receipts), (2, 1))
+        self.assertEqual(pending.receipts[0].outcome, kernel.OperationalOutcome.RETRYABLE_FAILURE)
+        successor = manifest(previous=initial.reference.manifest_digest, first=kernel.UnitLifecycleState.PROPOSED)
+        retried = self.store.publish_manifest("run-1", successor, expected_predecessor_digest=initial.reference.manifest_digest, attempt=3, attempt_ceiling=3)
+        self.assertIsNone(retried.error)
+        recovered = self.store.recover("run-1")
+        self.assertEqual(tuple(receipt.attempt for receipt in recovered.receipts), (3, 2, 1))
+        self.assertEqual(recovered.manifest.units[0].lifecycle_state, kernel.UnitLifecycleState.PROPOSED)
+
+    def test_result_models_are_exclusive_and_typed_reads_require_kernel_contracts(self) -> None:
+        for factory in (ObjectWriteResult, ObjectReadResult, OutcomeResult, PublicationResult, RecoveryResult):
+            with self.subTest(factory=factory.__name__), self.assertRaises(ValidationError):
+                factory()
+        written = self.store.put_object(manifest())
+        typed = self.store.read_object(written.digest, kernel.UnitManifest)
+        self.assertIsInstance(typed.value, kernel.UnitManifest)
+        class ArbitraryModel(BaseModel):
+            value: str
+        self.assertEqual(self.store.put_object(ArbitraryModel(value="no")).error.code, "invalid-content-model")
+        self.assertEqual(self.store.read_object(written.digest, ArbitraryModel).error.code, "object-schema-mismatch")
+        self.assertEqual(self.store.read_object(written.digest, kernel.RunReference).error.code, "object-schema-mismatch")
+        with self.assertRaises(ValidationError):
+            PublicationResult(error=self._retryable_error(), reference=kernel.RunReference(run_id="run", manifest_digest=DIGEST_A, completion_receipt_digest=DIGEST_B))
+
+    def test_malformed_runtime_input_stale_gate_partial_install_and_windows_aliases_fail_closed(self) -> None:
+        self.assertEqual(self.store.publish_manifest("run-1", object(), expected_predecessor_digest=None).error.code, "invalid-manifest")
+        self.assertEqual(self.store.publish_manifest("CON", manifest(), expected_predecessor_digest=None).error.code, "invalid-run-id")
+        gate = Path(self.temp.name) / "locks" / ".run-1.acquire"
+        owner = kernel.LockOwner(host=socket.gethostname(), pid=99999999, process_started_identity="dead", acquired_at=datetime.now(UTC))
+        gate.write_bytes(kernel.canonical_bytes(owner))
+        self.assertIsNone(self.store.publish_manifest("run-1", manifest(), expected_predecessor_digest=None).error)
+        failure_store = FilesystemArtifactStore(Path(self.temp.name) / "partial")
+        with mock.patch("librarianlm_i18n.adapters.filesystem_artifact_store.os.link", side_effect=OSError("injected install failure")):
+            failed = failure_store.put_object(manifest())
+        self.assertEqual(failed.error.code, "artifact-write-failed")
+        self.assertFalse(list((Path(self.temp.name) / "partial" / "objects" / "sha256").glob("*.json")))
+
+    def test_reparse_or_symlink_artifact_root_is_rejected(self) -> None:
+        target = Path(self.temp.name) / "real-root"
+        target.mkdir()
+        redirect = Path(self.temp.name) / "redirect-root"
+        try:
+            os.symlink(target, redirect, target_is_directory=True)
+        except OSError as error:
+            self.skipTest(f"symlink creation is unavailable: {error}")
+        redirected = FilesystemArtifactStore(redirect)
+        self.assertEqual(redirected.put_object(manifest()).error.code, "unsafe-artifact-root")

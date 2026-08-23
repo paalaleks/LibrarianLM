@@ -78,31 +78,51 @@ The atomic run reference is a small canonical pointer containing both manifest a
 
 ## Suggested Review Order
 
-**Commit protocol and recovery**
+**Publication and recovery protocol**
 
-- Centralizes immutable object, receipt, lock, CAS, and chain-verification semantics.
-  [`filesystem_artifact_store.py:50`](../../src/i18n-pipeline/src/librarianlm_i18n/adapters/filesystem_artifact_store.py#L50)
+- Validates history, successors, locking, CAS, and commit-point publication in one boundary.
+  [`filesystem_artifact_store.py:618`](../../src/i18n-pipeline/src/librarianlm_i18n/adapters/filesystem_artifact_store.py#L618)
 
-- Publishes only after validated history and an exclusive per-run lock.
-  [`filesystem_artifact_store.py:407`](../../src/i18n-pipeline/src/librarianlm_i18n/adapters/filesystem_artifact_store.py#L407)
+- Reconstructs only aligned manifest history plus validated post-reference failure outcomes.
+  [`filesystem_artifact_store.py:764`](../../src/i18n-pipeline/src/librarianlm_i18n/adapters/filesystem_artifact_store.py#L764)
 
-- Reconstructs only a complete, aligned manifest and receipt history.
-  [`filesystem_artifact_store.py:489`](../../src/i18n-pipeline/src/librarianlm_i18n/adapters/filesystem_artifact_store.py#L489)
+- Appends failure and reconciliation outcomes without falsely advancing the committed manifest.
+  [`filesystem_artifact_store.py:692`](../../src/i18n-pipeline/src/librarianlm_i18n/adapters/filesystem_artifact_store.py#L692)
+
+**Durability and concurrency boundaries**
+
+- Uses owner-verified, reclaimable acquisition and run locks with fail-closed ambiguity.
+  [`filesystem_artifact_store.py:389`](../../src/i18n-pipeline/src/librarianlm_i18n/adapters/filesystem_artifact_store.py#L389)
+
+- Installs immutable bytes without exposing partial final objects or receipts.
+  [`filesystem_artifact_store.py:151`](../../src/i18n-pipeline/src/librarianlm_i18n/adapters/filesystem_artifact_store.py#L151)
+
+- Performs durable atomic reference replacement with platform-specific write-through handling.
+  [`filesystem_artifact_store.py:183`](../../src/i18n-pipeline/src/librarianlm_i18n/adapters/filesystem_artifact_store.py#L183)
+
+- Enforces immediate lifecycle edges and typed terminal-failure provenance.
+  [`filesystem_artifact_store.py:455`](../../src/i18n-pipeline/src/librarianlm_i18n/adapters/filesystem_artifact_store.py#L455)
 
 **Strict contract boundary**
 
-- Defines immutable linkage, retry, lock-owner, and completion-receipt contracts.
-  [`contracts.py:339`](../../src/i18n-pipeline/src/librarianlm_i18n/kernel/contracts.py#L339)
+- Defines outcome-aware immutable receipts, retry budgets, findings, and produced digests.
+  [`contracts.py:367`](../../src/i18n-pipeline/src/librarianlm_i18n/kernel/contracts.py#L367)
 
-- Adds the nullable predecessor link required for genesis manifests.
-  [`contracts.py:454`](../../src/i18n-pipeline/src/librarianlm_i18n/kernel/contracts.py#L454)
+- Binds committed manifests to completion receipts as the sole visible run reference.
+  [`contracts.py:419`](../../src/i18n-pipeline/src/librarianlm_i18n/kernel/contracts.py#L419)
 
 **Storage abstraction**
 
-- Keeps caller-visible persistence outcomes independent of filesystem paths.
-  [`artifact_store.py:43`](../../src/i18n-pipeline/src/librarianlm_i18n/ports/artifact_store.py#L43)
+- Exposes typed object, publication, outcome-history, and recovery operations without paths.
+  [`artifact_store.py:87`](../../src/i18n-pipeline/src/librarianlm_i18n/ports/artifact_store.py#L87)
 
 **Verification matrix**
 
-- Exercises immutable storage, CAS/rebase, recovery, retries, crash windows, and locks.
-  [`test_filesystem_artifact_store.py:53`](../../src/i18n-pipeline/tests/test_filesystem_artifact_store.py#L53)
+- Proves direct successors cannot skip lifecycle or mutate immutable unit inventory.
+  [`test_filesystem_artifact_store.py:229`](../../src/i18n-pipeline/tests/test_filesystem_artifact_store.py#L229)
+
+- Proves failure tails remain observable and retry numbering stays append-only.
+  [`test_filesystem_artifact_store.py:278`](../../src/i18n-pipeline/tests/test_filesystem_artifact_store.py#L278)
+
+- Proves typed reads and success/error result exclusivity at the public boundary.
+  [`test_filesystem_artifact_store.py:297`](../../src/i18n-pipeline/tests/test_filesystem_artifact_store.py#L297)
