@@ -9,6 +9,8 @@ from .artifact_store import (
     RecoveryResult,
     StoreResult,
 )
+from .html_document import HtmlDocument, HtmlSelectionResult, SelectedSourceSlot
+from .package_signer import PackageSigner, SignatureResult, VerificationResult
 
 __all__ = [
     "ArtifactStore",
@@ -18,4 +20,10 @@ __all__ = [
     "PublicationResult",
     "RecoveryResult",
     "StoreResult",
+    "HtmlDocument",
+    "HtmlSelectionResult",
+    "SelectedSourceSlot",
+    "PackageSigner",
+    "SignatureResult",
+    "VerificationResult",
 ]

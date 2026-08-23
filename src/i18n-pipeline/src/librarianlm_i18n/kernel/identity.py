@@ -35,6 +35,11 @@ TokenId = Annotated[
     Strict(),
     StringConstraints(pattern=r"^[A-Z2-7]{26}$"),
 ]
+StructuralFingerprint = Annotated[
+    str,
+    Strict(),
+    StringConstraints(pattern=r"^structural-fingerprint:[0-9a-f]{64}$"),
+]
 DomLocator = Annotated[
     str,
     Strict(),
@@ -49,6 +54,7 @@ __all__ = [
     "ProjectionGroupId",
     "Sha256Digest",
     "SourceUnitId",
+    "StructuralFingerprint",
     "TokenId",
     "derive_typed_id",
     "is_sha256_digest",

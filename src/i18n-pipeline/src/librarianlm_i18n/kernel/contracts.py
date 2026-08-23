@@ -14,6 +14,7 @@ from .identity import (
     ProjectionGroupId,
     Sha256Digest,
     SourceUnitId,
+    StructuralFingerprint,
     TokenId,
 )
 from .errors import ActionableError, Retryability
@@ -68,6 +69,27 @@ __all__ = [
     "UsefulnessEvaluationReport",
     "ValidationReport",
     "VersionedContract",
+    "CanonicalSourcePackage",
+    "ConfirmationReceipt",
+    "DeclaredProjection",
+    "EditorialRule",
+    "EditorialSheet",
+    "EditorialSheetKind",
+    "EditorialSheetState",
+    "OwnershipProfile",
+    "OwnedRoot",
+    "PreparePackage",
+    "PreparePolicy",
+    "PrepareResult",
+    "PreparationFinding",
+    "PreparationFindings",
+    "PreparationOutcome",
+    "ProjectionProfile",
+    "SegmentationProfile",
+    "SignatureRecord",
+    "SlotDisposition",
+    "SlotRule",
+    "StructuralLocation",
 ]
 
 
@@ -107,6 +129,20 @@ class TypedLocator(VersionedContract):
     kind: StrictStr = Field(min_length=1)
 
 
+class StructuralLocation(VersionedContract):
+    """Selector-free, durable source location identity used by Prepare."""
+
+    owned_root_id: StrictStr = Field(min_length=1)
+    path: tuple[StrictInt, ...]
+    slot: StrictStr = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def path_is_nonnegative(self) -> "StructuralLocation":
+        if any(part < 0 for part in self.path):
+            raise ValueError("structural paths cannot contain negative indexes")
+        return self
+
+
 class Eligibility(StrEnum):
     REQUIRED = "required"
     EXCLUDED = "excluded"
@@ -127,7 +163,7 @@ class UnitRecord(VersionedContract):
     content_class: ContentClass
     eligibility: Eligibility
     eligibility_reason: StrictStr = Field(min_length=1)
-    projection_group_id: ProjectionGroupId
+    projection_group_id: ProjectionGroupId | None = None
     inline_binding_map_digest: Sha256Digest | None = None
     lifecycle_state: UnitLifecycleState
     proposal: ProvenanceReference | None = None
@@ -135,12 +171,220 @@ class UnitRecord(VersionedContract):
     recovery_candidate: ProvenanceReference | None = None
     machine_final: ProvenanceReference | None = None
     failed_unit: ProvenanceReference | None = None
+    # These fields are optional only to preserve Story 1.1 manifests.  Every
+    # Story 1.3-produced record supplies them and validates them at the package
+    # boundary below.
+    structural_location: StructuralLocation | None = None
+    structural_fingerprint: StructuralFingerprint | None = None
+    source_text_digest: Sha256Digest | None = None
 
     @model_validator(mode="after")
     def eligibility_reason_is_meaningful(self) -> "UnitRecord":
         if not self.eligibility_reason.strip():
             raise ValueError("every eligibility value requires a nonempty reason")
         return self
+
+
+class SlotDisposition(StrEnum):
+    REQUIRED = "required"
+    EXCLUDED = "excluded"
+    UNSUPPORTED = "unsupported"
+
+
+class OwnedRoot(VersionedContract):
+    root_id: StrictStr = Field(min_length=1)
+    element_id: StrictStr = Field(min_length=1)
+    disposition: SlotDisposition = SlotDisposition.REQUIRED
+
+
+class SlotRule(VersionedContract):
+    """Fixture-v1 structural rule.  It intentionally is not a CSS/XPath rule."""
+
+    element_id: StrictStr = Field(min_length=1)
+    disposition: SlotDisposition
+    reason: StrictStr = Field(min_length=1)
+    attribute_names: tuple[StrictStr, ...] = ()
+    projection_key: StrictStr | None = None
+
+    @model_validator(mode="after")
+    def attribute_names_are_unique(self) -> "SlotRule":
+        if len(set(self.attribute_names)) != len(self.attribute_names) or any(not name for name in self.attribute_names):
+            raise ValueError("slot-rule attribute names must be nonempty and unique")
+        return self
+
+
+class OwnershipProfile(VersionedContract):
+    profile_id: ComponentId
+    profile_version: StrictStr = Field(min_length=1)
+    owned_roots: tuple[OwnedRoot, ...] = Field(min_length=1)
+    slot_rules: tuple[SlotRule, ...] = ()
+    application_owned_attribute: StrictStr = Field(default="data-librarianlm-owned", min_length=1)
+
+    @model_validator(mode="after")
+    def ownership_profile_is_unambiguous(self) -> "OwnershipProfile":
+        roots = tuple(root.root_id for root in self.owned_roots)
+        element_ids = tuple(root.element_id for root in self.owned_roots)
+        rules = tuple(rule.element_id for rule in self.slot_rules)
+        if len(set(roots)) != len(roots) or len(set(element_ids)) != len(element_ids):
+            raise ValueError("owned roots require unique durable root and element IDs")
+        if len(set(rules)) != len(rules):
+            raise ValueError("fixture slot rules require unique element IDs")
+        return self
+
+
+class DeclaredProjection(VersionedContract):
+    projection_key: StrictStr = Field(min_length=1)
+    member_locations: tuple[StructuralLocation, ...] = Field(min_length=1)
+    transformation_rule: StrictStr = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def members_are_unique(self) -> "DeclaredProjection":
+        if len(set(self.member_locations)) != len(self.member_locations):
+            raise ValueError("declared projection members must be unique")
+        return self
+
+
+class ProjectionProfile(VersionedContract):
+    profile_id: ComponentId
+    profile_version: StrictStr = Field(min_length=1)
+    projections: tuple[DeclaredProjection, ...] = ()
+
+    @model_validator(mode="after")
+    def projection_keys_are_unique(self) -> "ProjectionProfile":
+        keys = tuple(item.projection_key for item in self.projections)
+        if len(set(keys)) != len(keys):
+            raise ValueError("declared projection keys must be unique")
+        return self
+
+
+class SegmentationProfile(VersionedContract):
+    profile_id: ComponentId
+    profile_version: StrictStr = Field(min_length=1)
+    rule: Literal["fixture-v1-one-unit-per-nonblank-slot"]
+
+
+class PreparationFinding(VersionedContract):
+    code: StrictStr = Field(min_length=1)
+    severity: Literal["blocking-error", "warning"]
+    subject: StrictStr = Field(min_length=1)
+    observed: StrictStr = Field(min_length=1)
+    next_action: StrictStr = Field(min_length=1)
+
+
+class PreparationFindings(VersionedContract):
+    findings: tuple[PreparationFinding, ...]
+
+
+class CanonicalSourcePackage(VersionedContract):
+    """Immutable, digest-bound input to fixture preparation."""
+
+    source_html: StrictStr
+    source_html_digest: Sha256Digest
+    converter_identity: ComponentIdentity
+    converter_findings: tuple[PreparationFinding, ...] = ()
+    ownership_profile: OwnershipProfile
+    projection_profile: ProjectionProfile
+    segmentation_profile: SegmentationProfile
+
+    @model_validator(mode="after")
+    def source_package_binds_exact_html(self) -> "CanonicalSourcePackage":
+        from .identity import sha256_digest
+        if sha256_digest(self.source_html.encode("utf-8")) != self.source_html_digest:
+            raise ValueError("canonical source HTML digest must bind exact UTF-8 HTML")
+        return self
+
+
+class PreparePolicy(VersionedContract):
+    """Exact profile compatibility policy for a preparation invocation."""
+
+    policy_id: ComponentId
+    policy_version: StrictStr = Field(min_length=1)
+    accepted_ownership_profile_id: ComponentId
+    accepted_ownership_profile_version: StrictStr = Field(min_length=1)
+    accepted_projection_profile_id: ComponentId
+    accepted_projection_profile_version: StrictStr = Field(min_length=1)
+    accepted_segmentation_profile_id: ComponentId
+    accepted_segmentation_profile_version: StrictStr = Field(min_length=1)
+    allow_warnings: StrictBool = False
+
+
+class EditorialSheetKind(StrEnum):
+    TERMINOLOGY = "terminology"
+    STYLE = "style"
+
+
+class EditorialSheetState(StrEnum):
+    CONFIRMED = "confirmed"
+    DRAFT = "draft"
+
+
+class EditorialRule(VersionedContract):
+    rule_id: StrictStr = Field(min_length=1)
+    text: StrictStr
+    required_unit_ids: tuple[SourceUnitId, ...] = ()
+
+
+class EditorialSheet(VersionedContract):
+    kind: EditorialSheetKind
+    state: EditorialSheetState
+    rules: tuple[EditorialRule, ...] = ()
+
+    @model_validator(mode="after")
+    def rule_ids_are_unique(self) -> "EditorialSheet":
+        ids = tuple(rule.rule_id for rule in self.rules)
+        if len(set(ids)) != len(ids):
+            raise ValueError("editorial sheet rule IDs must be unique")
+        return self
+
+
+class PreparePackage(VersionedContract):
+    source_package_digest: Sha256Digest
+    run_snapshot_digest: Sha256Digest
+    manifest_digest: Sha256Digest
+    policy_digest: Sha256Digest
+    terminology_sheet_digest: Sha256Digest
+    style_sheet_digest: Sha256Digest
+    findings_digest: Sha256Digest
+    ownership_profile: OwnershipProfile
+    projection_profile: ProjectionProfile
+    segmentation_profile: SegmentationProfile
+    status: Literal["ready-for-confirmation"]
+
+
+class PreparationOutcome(VersionedContract):
+    status: Literal["ready-for-confirmation", "blocked"]
+    findings: tuple[PreparationFinding, ...]
+    package_digest: Sha256Digest | None = None
+    manifest_digest: Sha256Digest | None = None
+
+    @model_validator(mode="after")
+    def package_presence_matches_outcome(self) -> "PreparationOutcome":
+        ready = self.status == "ready-for-confirmation"
+        if ready != (self.package_digest is not None and self.manifest_digest is not None):
+            raise ValueError("ready preparation outcomes require package and manifest digests only")
+        if not ready and (self.package_digest is not None or self.manifest_digest is not None):
+            raise ValueError("blocked preparation outcomes cannot publish a package or manifest")
+        return self
+
+
+class PrepareResult(VersionedContract):
+    outcome: PreparationOutcome
+    manifest: UnitManifest | None = None
+    package: PreparePackage | None = None
+
+
+class SignatureRecord(VersionedContract):
+    algorithm: Literal["hmac-sha256"]
+    key_id: StrictStr = Field(min_length=1)
+    package_digest: Sha256Digest
+    signature: StrictStr = Field(min_length=1)
+
+
+class ConfirmationReceipt(VersionedContract):
+    package_digest: Sha256Digest
+    signature_digest: Sha256Digest
+    key_id: StrictStr = Field(min_length=1)
+    operator_id: StrictStr = Field(min_length=1)
 
 
 class StatusValue(StrEnum):
@@ -481,6 +725,7 @@ class UnitManifest(VersionedContract):
     source_package_digest: Sha256Digest
     run_snapshot_digest: Sha256Digest
     segmentation_profile_id: ComponentId
+    segmentation_profile_version: StrictStr | None = None
     profile_id: ComponentId
     units: tuple[UnitRecord, ...]
     projection_groups: tuple[ProjectionMap, ...]
@@ -503,6 +748,6 @@ class UnitManifest(VersionedContract):
         groups = set(projection_group_ids)
         if any(group.canonical_source_unit_id not in source_units for group in self.projection_groups):
             raise ValueError("projection canonical source units must exist in the manifest")
-        if any(unit.projection_group_id not in groups for unit in self.units):
-            raise ValueError("every unit projection group must resolve in the manifest")
+        if any(unit.projection_group_id is not None and unit.projection_group_id not in groups for unit in self.units):
+            raise ValueError("every declared unit projection group must resolve in the manifest")
         return self
