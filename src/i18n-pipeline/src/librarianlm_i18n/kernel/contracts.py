@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Literal
 
@@ -37,11 +38,15 @@ __all__ = [
     "InlineBindingMap",
     "KernelModel",
     "MachineFinal",
+    "ManifestLink",
     "ModelParameter",
     "ModelRequest",
     "ModelResponse",
     "ModelTool",
     "ModelUsage",
+    "OperationalFinding",
+    "OperationalOutcome",
+    "OperationalReceipt",
     "ProjectionMap",
     "ProjectionOwnership",
     "Proposal",
@@ -50,8 +55,10 @@ __all__ = [
     "ProvenanceReference",
     "RecoveryCandidate",
     "RunComparison",
+    "RunReference",
     "StatusValue",
     "StatusVector",
+    "LockOwner",
     "TokenEntry",
     "TranslationRunSummary",
     "TypedLocator",
@@ -322,6 +329,75 @@ class Finding(VersionedContract):
     observed: StrictStr = Field(min_length=1)
 
 
+class OperationalFinding(VersionedContract):
+    """A stable, receipt-local observation; it is not a content finding."""
+
+    code: StrictStr = Field(min_length=1)
+    message: StrictStr = Field(min_length=1)
+
+
+class ManifestLink(VersionedContract):
+    """The immutable predecessor/successor relation written by a publication."""
+
+    predecessor_manifest_digest: Sha256Digest | None = None
+    successor_manifest_digest: Sha256Digest
+
+
+class OperationalOutcome(StrEnum):
+    COMPLETED = "completed"
+    RETRYABLE_FAILURE = "retryable-failure"
+    TERMINAL_FAILURE = "terminal-failure"
+    RECONCILIATION_REQUIRED = "reconciliation-required"
+
+
+class LockOwner(VersionedContract):
+    host: StrictStr = Field(min_length=1)
+    pid: StrictInt = Field(gt=0)
+    process_started_identity: StrictStr = Field(min_length=1)
+    acquired_at: datetime
+
+    @model_validator(mode="after")
+    def acquired_at_is_utc(self) -> "LockOwner":
+        if self.acquired_at.tzinfo is None or self.acquired_at.utcoffset() != UTC.utcoffset(self.acquired_at):
+            raise ValueError("lock ownership timestamps must be UTC")
+        return self
+
+
+class OperationalReceipt(VersionedContract):
+    """Append-only operational history, deliberately separate from content objects."""
+
+    run_id: StrictStr = Field(min_length=1)
+    attempt: StrictInt = Field(ge=1)
+    attempt_ceiling: StrictInt = Field(ge=1)
+    started_at: datetime
+    completed_at: datetime
+    outcome: OperationalOutcome
+    retry_guidance: StrictStr = Field(min_length=1)
+    lock_owner: LockOwner
+    manifest_link: ManifestLink
+    predecessor_receipt_digest: Sha256Digest | None = None
+    findings: tuple[OperationalFinding, ...] = ()
+
+    @model_validator(mode="after")
+    def receipt_times_and_attempts_are_valid(self) -> "OperationalReceipt":
+        if self.attempt > self.attempt_ceiling:
+            raise ValueError("receipt attempt cannot exceed its frozen ceiling")
+        for value in (self.started_at, self.completed_at):
+            if value.tzinfo is None or value.utcoffset() != UTC.utcoffset(value):
+                raise ValueError("receipt timestamps must be explicit UTC")
+        if self.completed_at < self.started_at:
+            raise ValueError("receipt completion cannot precede its start")
+        return self
+
+
+class RunReference(VersionedContract):
+    """The sole commit point for a run: a manifest plus its completion receipt."""
+
+    run_id: StrictStr = Field(min_length=1)
+    manifest_digest: Sha256Digest
+    completion_receipt_digest: Sha256Digest
+
+
 class AssemblyReport(VersionedContract):
     manifest_digest: Sha256Digest
     findings: tuple[Finding, ...]
@@ -384,6 +460,7 @@ class UnitManifest(VersionedContract):
     projection_groups: tuple[ProjectionMap, ...]
     status: StatusVector
     provenance: tuple[ProvenanceReference, ...]
+    previous_manifest_digest: Sha256Digest | None = None
 
     @model_validator(mode="after")
     def references_form_one_consistent_inventory(self) -> "UnitManifest":

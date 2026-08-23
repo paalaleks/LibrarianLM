@@ -125,6 +125,10 @@ class KernelContractTests(unittest.TestCase):
             "HumanEditSet",
             "BookFinding",
             "GatewayReceipt",
+            "ManifestLink",
+            "RunReference",
+            "LockOwner",
+            "OperationalReceipt",
         )
         for name in required:
             self.assertTrue(hasattr(kernel, name), name)
