@@ -50,6 +50,15 @@ __all__ = [
     "ProtectedSegment",
     "FixtureTarget",
     "FixtureTargets",
+    "FixtureMode",
+    "RunSnapshot",
+    "WorkflowDeclaration",
+    "WorkflowInvocation",
+    "PrepareInvocation",
+    "ConfirmationInvocation",
+    "AssembleValidateInvocation",
+    "InvocationReceipt",
+    "InvocationTerminalResult",
     "CandidateDraft",
     "ApplicationEvidence",
     "AssemblyResult",
@@ -617,6 +626,146 @@ class FixtureTargets(VersionedContract):
         ids = tuple(item.source_unit_id for item in self.targets)
         if len(set(ids)) != len(ids):
             raise ValueError("fixture targets must not repeat a source unit")
+        return self
+
+
+class FixtureMode(StrEnum):
+    """The MVP deliberately exposes no environment-selected execution mode."""
+
+    FIXTURE = "fixture"
+
+
+class WorkflowDeclaration(VersionedContract):
+    """Stable public declaration for one independently invocable workflow."""
+
+    workflow_id: StrictStr = Field(min_length=1)
+    purpose: StrictStr = Field(min_length=1)
+    input_contracts: tuple[CompatibilityMetadata, ...] = Field(min_length=1)
+    output_kinds: tuple[StrictStr, ...] = Field(min_length=1)
+    preconditions: tuple[StrictStr, ...] = Field(min_length=1)
+    confirmation_required: StrictBool
+    retry_policy: StrictStr = Field(min_length=1)
+    failure_policy: StrictStr = Field(min_length=1)
+    terminal_outcomes: tuple[OperationalOutcome, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def declaration_is_unambiguous(self) -> "WorkflowDeclaration":
+        if len(set(self.output_kinds)) != len(self.output_kinds):
+            raise ValueError("workflow output kinds must be unique")
+        if len(set(self.terminal_outcomes)) != len(self.terminal_outcomes):
+            raise ValueError("workflow terminal outcomes must be unique")
+        return self
+
+
+class RunSnapshot(VersionedContract):
+    """All caller-controlled fixture inputs, frozen before Prepare starts."""
+
+    run_id: StrictStr = Field(min_length=1)
+    fixture_mode: FixtureMode
+    source_package: CanonicalSourcePackage
+    prepare_policy: PreparePolicy
+    editorial_sheets: tuple[EditorialSheet, ...] = Field(min_length=2, max_length=2)
+    validation_controls: ValidationControls
+    component_identities: tuple["ComponentIdentity", ...] = Field(min_length=1)
+    fixture_targets: FixtureTargets
+    attempt_ceiling: StrictInt = Field(ge=1)
+
+    @model_validator(mode="after")
+    def snapshot_is_complete_and_self_consistent(self) -> "RunSnapshot":
+        if self.fixture_mode is not FixtureMode.FIXTURE:
+            raise ValueError("only explicit fixture mode is supported")
+        if self.prepare_policy.validation_controls != self.validation_controls:
+            raise ValueError("snapshot validation controls must exactly match its preparation policy")
+        if self.source_package.converter_identity not in self.component_identities:
+            raise ValueError("snapshot component identities must include the frozen converter")
+        kinds = tuple(sheet.kind for sheet in self.editorial_sheets)
+        if set(kinds) != {EditorialSheetKind.TERMINOLOGY, EditorialSheetKind.STYLE} or len(set(kinds)) != 2:
+            raise ValueError("snapshot requires exactly one terminology and one style sheet")
+        if any(sheet.state is not EditorialSheetState.CONFIRMED for sheet in self.editorial_sheets):
+            raise ValueError("snapshot editorial sheets must be explicitly confirmed")
+        return self
+
+
+class WorkflowInvocation(VersionedContract):
+    """Base raw public input, including explicit operator authorization."""
+
+    snapshot: RunSnapshot
+    operator_authorized: StrictBool
+
+
+class PrepareInvocation(WorkflowInvocation):
+    pass
+
+
+class ConfirmationInvocation(VersionedContract):
+    snapshot_digest: Sha256Digest
+    package_digest: Sha256Digest
+    requested_key_id: StrictStr = Field(min_length=1)
+    operator_id: StrictStr = Field(min_length=1)
+    operator_authorized: StrictBool
+
+
+class AssembleValidateInvocation(VersionedContract):
+    snapshot_digest: Sha256Digest
+    package_digest: Sha256Digest
+    confirmation: ConfirmationReceipt
+    operator_authorized: StrictBool
+
+
+class InvocationTerminalResult(VersionedContract):
+    """A public terminal state that cannot represent partial work as success."""
+
+    outcome: OperationalOutcome
+    recoverable: StrictBool
+    references: tuple[ArtifactReference, ...] = ()
+    status: StatusVector | None = None
+    error: ActionableError | None = None
+    retry_guidance: StrictStr = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def terminal_result_is_exclusive(self) -> "InvocationTerminalResult":
+        successful = self.outcome is OperationalOutcome.COMPLETED
+        if successful != (self.error is None):
+            raise ValueError("completed terminal results have no error; non-completed results require one")
+        if successful and not self.references:
+            raise ValueError("completed terminal results require output references")
+        if self.recoverable != (self.outcome is OperationalOutcome.RETRYABLE_FAILURE):
+            raise ValueError("recoverability must match a retryable terminal outcome")
+        if len({item.kind for item in self.references}) != len(self.references):
+            raise ValueError("terminal output reference kinds must be unique")
+        return self
+
+
+class InvocationReceipt(VersionedContract):
+    """Append-only, non-manifest workflow history for resumable composition."""
+
+    run_id: StrictStr = Field(min_length=1)
+    workflow_id: StrictStr = Field(min_length=1)
+    declaration_digest: Sha256Digest
+    snapshot_digest: Sha256Digest
+    input_digests: tuple[Sha256Digest, ...] = Field(min_length=1)
+    output_references: tuple[ArtifactReference, ...] = ()
+    attempt: StrictInt = Field(ge=1)
+    attempt_ceiling: StrictInt = Field(ge=1)
+    started_at: datetime
+    completed_at: datetime
+    finding_count: StrictInt = Field(ge=0)
+    terminal: InvocationTerminalResult
+    predecessor_receipt_digest: Sha256Digest | None = None
+
+    @model_validator(mode="after")
+    def invocation_receipt_is_appendable(self) -> "InvocationReceipt":
+        if self.attempt > self.attempt_ceiling:
+            raise ValueError("invocation receipt attempt cannot exceed its frozen ceiling")
+        if self.completed_at < self.started_at:
+            raise ValueError("invocation receipt completion cannot precede its start")
+        for value in (self.started_at, self.completed_at):
+            if value.tzinfo is None or value.utcoffset() != UTC.utcoffset(value):
+                raise ValueError("invocation receipt timestamps must be explicit UTC")
+        if self.output_references != self.terminal.references:
+            raise ValueError("invocation receipt outputs must exactly match its terminal result")
+        if len(set(self.input_digests)) != len(self.input_digests):
+            raise ValueError("invocation receipt input digests must be unique")
         return self
 
 

@@ -34,6 +34,24 @@ class AssemblyWorkflow:
         self._document = document
         self._signer = signer
 
+    def verify_confirmation(self, *, package_digest: str, confirmation: ConfirmationReceipt) -> ActionableError | None:
+        """Public reusable handoff verification for composition and resume."""
+        try:
+            persisted = self._store.read_object(sha256_digest(canonical_bytes(confirmation)), ConfirmationReceipt)
+            if persisted.error is not None or persisted.value != confirmation:
+                return persisted.error or self._error("confirmation-receipt-missing", "confirmation", "canonical receipt is not durably persisted")
+            signature = self._read(confirmation.signature_digest, SignatureRecord)
+            if signature.package_digest != package_digest or confirmation.package_digest != package_digest:
+                return self._error("confirmation-package-mismatch", "confirmation", "confirmation or signature binds another package")
+            verified = self._signer.verify(signature, package_digest, confirmation.key_id)
+            if verified.error is not None or not verified.verified:
+                return verified.error or self._error("signature-invalid", "confirmation", "signer rejected persisted signature")
+            return None
+        except KernelValidationError as failure:
+            return failure.error
+        except Exception as error:
+            return self._error("confirmation-verification-failure", "confirmation", f"{type(error).__name__}: {error}", retryable=True)
+
     def assemble(self, *, package_digest: str, confirmation: ConfirmationReceipt, fixture_targets: FixtureTargets) -> AssemblyExecutionResult:
         try:
             package = self._read(package_digest, PreparePackage)

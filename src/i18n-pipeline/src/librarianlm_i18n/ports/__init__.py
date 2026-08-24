@@ -2,6 +2,8 @@
 
 from .artifact_store import (
     ArtifactStore,
+    InvocationAppendResult,
+    InvocationRecoveryResult,
     ObjectReadResult,
     ObjectWriteResult,
     OutcomeResult,
@@ -15,6 +17,8 @@ from .residual_language import ResidualLanguageDetector, ResidualLanguageResult
 
 __all__ = [
     "ArtifactStore",
+    "InvocationAppendResult",
+    "InvocationRecoveryResult",
     "ObjectReadResult",
     "ObjectWriteResult",
     "OutcomeResult",

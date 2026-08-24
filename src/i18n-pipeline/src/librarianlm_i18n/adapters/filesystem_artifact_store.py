@@ -22,6 +22,7 @@ from librarianlm_i18n.kernel.canonical import HostileJsonError, canonical_bytes,
 from librarianlm_i18n.kernel.contracts import (
     LockOwner,
     KernelModel,
+    InvocationReceipt,
     ManifestLink,
     OperationalOutcome,
     OperationalReceipt,
@@ -38,6 +39,8 @@ from librarianlm_i18n.ports.artifact_store import (
     ObjectWriteResult,
     PublicationResult,
     OutcomeResult,
+    InvocationAppendResult,
+    InvocationRecoveryResult,
     RecoveryResult,
 )
 
@@ -512,6 +515,108 @@ class FilesystemArtifactStore:
         self._assert_safe_path(path, "operational-receipt")
         self._atomic_create_or_verify(path, content, subject="operational-receipt")
         return digest
+
+    def _invocation_dir(self, run_id: str) -> Path:
+        path = self._run_dir(run_id) / "invocations"
+        self._assert_safe_path(path, "invocation-receipt")
+        self._safe_mkdir(path)
+        return path
+
+    def _write_invocation_receipt(self, receipt: InvocationReceipt) -> str:
+        content = canonical_bytes(receipt)
+        digest = sha256_digest(content)
+        path = self._invocation_dir(receipt.run_id) / f"{digest}.json"
+        self._assert_safe_path(path, "invocation-receipt")
+        self._atomic_create_or_verify(path, content, subject="invocation-receipt")
+        return digest
+
+    def _read_invocation_receipt(self, run_id: str, digest: str) -> InvocationReceipt:
+        path = self._invocation_dir(run_id) / f"{digest}.json"
+        self._assert_safe_path(path, "invocation-receipt")
+        try:
+            content = path.read_bytes()
+            if sha256_digest(content) != digest or canonical_bytes(load_strict_json(content)) != content:
+                raise self._error("invocation-recovery-invalid", "invocation-receipt", "receipt-integrity", digest, "digest or canonical bytes mismatch")
+            receipt = InvocationReceipt.model_validate_json(content)
+            if receipt.run_id != run_id:
+                raise self._error("invocation-recovery-invalid", "invocation-receipt", "receipt-run-binding", run_id, receipt.run_id)
+            return receipt
+        except _StoreFailure:
+            raise
+        except (OSError, HostileJsonError, ValidationError, TypeError, ValueError) as error:
+            raise self._error("invocation-recovery-invalid", "invocation-receipt", "readable-strict-receipt", "a valid canonical invocation receipt", str(error)) from error
+
+    def recover_invocation_receipts(self, run_id: str) -> InvocationRecoveryResult:
+        """Recover the separate non-manifest invocation chain, oldest first."""
+        try:
+            self._ensure_root()
+            directory = self._invocation_dir(run_id)
+            paths = tuple(directory.glob("*.json"))
+            if not paths:
+                return InvocationRecoveryResult()
+            records: dict[str, InvocationReceipt] = {}
+            for path in paths:
+                self._assert_safe_path(path, "invocation-receipt")
+                if not is_sha256_digest(path.stem):
+                    raise self._error("invocation-recovery-invalid", "invocation-receipt", "digest-named-receipt", "SHA-256 receipt names", path.name)
+                records[path.stem] = self._read_invocation_receipt(run_id, path.stem)
+            roots = [(digest, value) for digest, value in records.items() if value.predecessor_receipt_digest is None]
+            if len(roots) != 1:
+                raise self._error("invocation-recovery-invalid", "invocation-receipt", "single-genesis-receipt", "exactly one genesis receipt", str(len(roots)))
+            receipt_digest, receipt = roots[0]
+            if receipt.attempt != 1:
+                raise self._error("invocation-recovery-invalid", "invocation-receipt", "genesis-attempt", "attempt 1 for genesis", str(receipt.attempt))
+            snapshot_digest = receipt.snapshot_digest
+            ordered = [receipt]
+            visited = {receipt_digest}
+            while True:
+                children = [(digest, value) for digest, value in records.items() if value.predecessor_receipt_digest == receipt_digest]
+                if not children:
+                    break
+                if len(children) != 1:
+                    raise self._error("invocation-recovery-invalid", "invocation-receipt", "linear-receipt-history", "exactly one next receipt", str(len(children)))
+                receipt_digest, receipt = children[0]
+                if receipt_digest in visited:
+                    raise self._error("invocation-recovery-invalid", "invocation-receipt", "acyclic-receipt-chain", "an acyclic receipt chain", "receipt cycle")
+                prior = ordered[-1]
+                if receipt.attempt != prior.attempt + 1 or receipt.attempt_ceiling != prior.attempt_ceiling:
+                    raise self._error("invocation-recovery-invalid", "invocation-receipt", "strict-next-attempt", str(prior.attempt + 1), str(receipt.attempt))
+                if receipt.snapshot_digest != snapshot_digest:
+                    raise self._error("invocation-recovery-invalid", "invocation-receipt", "frozen-snapshot-digest", snapshot_digest, receipt.snapshot_digest)
+                visited.add(receipt_digest)
+                ordered.append(receipt)
+            if len(visited) != len(records):
+                raise self._error("invocation-recovery-invalid", "invocation-receipt", "single-linear-history", "every receipt linked into one chain", "orphaned or divergent receipt")
+            return InvocationRecoveryResult(receipts=tuple(ordered))
+        except _StoreFailure as failure:
+            return InvocationRecoveryResult(error=failure.error)
+        except (OSError, TypeError, ValueError, AttributeError) as error:
+            return InvocationRecoveryResult(error=self._unexpected("invocation-recovery", error))
+
+    def append_invocation_receipt(self, receipt: InvocationReceipt) -> InvocationAppendResult:
+        try:
+            self._ensure_root()
+            if not isinstance(receipt, InvocationReceipt):
+                raise self._error("invalid-invocation-receipt", "invocation-receipt", "strict-contract", "an InvocationReceipt", type(receipt).__name__)
+            self._run_dir(receipt.run_id)
+            with self._run_lock(receipt.run_id):
+                recovered = self.recover_invocation_receipts(receipt.run_id)
+                if recovered.error is not None:
+                    raise _StoreFailure(recovered.error)
+                history = recovered.receipts
+                prior = history[-1] if history else None
+                if prior is None:
+                    if receipt.attempt != 1 or receipt.predecessor_receipt_digest is not None:
+                        raise self._error("invocation-history-invalid", "invocation-receipt", "genesis-attempt", "attempt 1 without a predecessor", f"attempt={receipt.attempt}")
+                else:
+                    prior_digest = sha256_digest(canonical_bytes(prior))
+                    if receipt.predecessor_receipt_digest != prior_digest or receipt.attempt != prior.attempt + 1 or receipt.attempt_ceiling != prior.attempt_ceiling or receipt.snapshot_digest != prior.snapshot_digest:
+                        raise self._error("invocation-history-invalid", "invocation-receipt", "strict-next-receipt", f"attempt {prior.attempt + 1} with the current predecessor", f"attempt={receipt.attempt}")
+                return InvocationAppendResult(receipt_digest=self._write_invocation_receipt(receipt))
+        except _StoreFailure as failure:
+            return InvocationAppendResult(error=failure.error)
+        except (OSError, TypeError, ValueError, AttributeError) as error:
+            return InvocationAppendResult(error=self._unexpected("invocation-receipt", error))
 
     def _latest_receipt(self, run_id: str, reference: RunReference | None) -> tuple[str, OperationalReceipt] | None:
         """Find the unique append-only receipt head, including failed attempts.

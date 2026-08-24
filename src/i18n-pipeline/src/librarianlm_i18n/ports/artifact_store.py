@@ -6,7 +6,7 @@ from typing import Protocol, TypeVar
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from librarianlm_i18n.kernel.contracts import OperationalFinding, OperationalOutcome, OperationalReceipt, RunReference, UnitManifest
+from librarianlm_i18n.kernel.contracts import InvocationReceipt, OperationalFinding, OperationalOutcome, OperationalReceipt, RunReference, UnitManifest
 from librarianlm_i18n.kernel.errors import ActionableError
 from librarianlm_i18n.kernel.identity import Sha256Digest
 from librarianlm_i18n.kernel.contracts import KernelModel
@@ -84,6 +84,26 @@ class OutcomeResult(StoreResult):
         return self
 
 
+class InvocationAppendResult(StoreResult):
+    receipt_digest: Sha256Digest | None = None
+
+    @model_validator(mode="after")
+    def exclusive_result(self) -> "InvocationAppendResult":
+        if (self.error is None) != (self.receipt_digest is not None):
+            raise ValueError("invocation append results require exactly one digest or error")
+        return self
+
+
+class InvocationRecoveryResult(StoreResult):
+    receipts: tuple[InvocationReceipt, ...] = ()
+
+    @model_validator(mode="after")
+    def exclusive_result(self) -> "InvocationRecoveryResult":
+        if self.error is not None and self.receipts:
+            raise ValueError("failed invocation recovery cannot carry receipt history")
+        return self
+
+
 class ArtifactStore(Protocol):
     def put_object(self, value: KernelModel) -> ObjectWriteResult: ...
 
@@ -112,5 +132,9 @@ class ArtifactStore(Protocol):
         retry_guidance: str,
         produced_artifact_digests: tuple[Sha256Digest, ...] = (),
     ) -> OutcomeResult: ...
+
+    def append_invocation_receipt(self, receipt: InvocationReceipt) -> InvocationAppendResult: ...
+
+    def recover_invocation_receipts(self, run_id: str) -> InvocationRecoveryResult: ...
 
     def recover(self, run_id: str) -> RecoveryResult: ...

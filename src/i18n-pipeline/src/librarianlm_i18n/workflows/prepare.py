@@ -90,7 +90,15 @@ class PrepareWorkflow:
                 validation_controls=policy.validation_controls,
                 status="ready-for-confirmation",
             )
-            published = self._store.publish_manifest(run_id, manifest, expected_predecessor_digest=None, attempt=attempt, attempt_ceiling=attempt_ceiling)
+            # A caller may supply a prior manifest solely for identity checks
+            # across runs.  It becomes a CAS predecessor only when this run's
+            # recovered Story 1.2 head names that exact manifest.
+            expected_predecessor = None
+            if prior_manifest is not None:
+                recovered = self._store.recover(run_id)
+                if recovered.error is None and recovered.manifest == prior_manifest:
+                    expected_predecessor = sha256_digest(canonical_bytes(prior_manifest))
+            published = self._store.publish_manifest(run_id, manifest, expected_predecessor_digest=expected_predecessor, attempt=attempt, attempt_ceiling=attempt_ceiling)
             if published.error is not None:
                 return PrepareExecutionResult(error=published.error)
             if published.reference.manifest_digest != manifest_digest:
