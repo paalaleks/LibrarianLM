@@ -337,6 +337,46 @@ class BoundaryTests(unittest.TestCase):
         )
         self.assertEqual(result.error, preserved)
 
+    def test_validation_contracts_are_strict_frozen_and_internally_consistent(self) -> None:
+        with self.assertRaises(ValidationError):
+            kernel.LocaleMetadata(language="en", direction="ltr", unexpected=True)
+        with self.assertRaises(ValidationError):
+            kernel.ResidualLanguageControl(tolerance="1")
+        with self.assertRaises(ValidationError):
+            kernel.TerminologyControl(rule_id="empty", required_terms=())
+        locale = kernel.LocaleMetadata(language="nb", direction="ltr")
+        with self.assertRaises(ValidationError):
+            locale.language = "en"
+        status = kernel.StatusVector(
+            processing=kernel.StatusValue.COMPLETE,
+            completeness=kernel.StatusValue.COMPLETE,
+            compliance=kernel.StatusValue.FAILED,
+            review=kernel.StatusValue.NOT_STARTED,
+            publication=kernel.StatusValue.NOT_READY,
+        )
+        finding = kernel.Finding(
+            code="validation-problem", severity="blocking-error", subject="unit",
+            rule="fixture", expected="expected", observed="observed",
+            retryability=kernel.Retryability.NOT_RETRYABLE, next_action="repair",
+        )
+        with self.assertRaises(ValidationError):
+            kernel.ValidationReport(
+                manifest_digest=DIGEST_A,
+                findings=(finding.model_copy(update={"code": "z"}), finding.model_copy(update={"code": "a"})),
+                status=status,
+            )
+        with self.assertRaises(ValidationError):
+            kernel.TranslationRunSummary(
+                manifest_digest=DIGEST_A, status=status, report_references=(),
+                finding_count=0, blocker_count=1,
+            )
+        with self.assertRaises(ValidationError):
+            kernel.ValidationReport(
+                manifest_digest=DIGEST_A, findings=(finding,),
+                status=status.model_copy(update={"compliance": kernel.StatusValue.CLEAN}),
+                assembly_report_digest=DIGEST_B,
+            )
+
 
 class LifecycleTests(unittest.TestCase):
     def test_complete_transition_table(self) -> None:

@@ -15,7 +15,7 @@ from librarianlm_i18n.kernel.contracts import (
 from librarianlm_i18n.kernel.errors import Retryability, actionable_error
 from librarianlm_i18n.kernel.identity import derive_token_id, derive_typed_id, render_protected_token, sha256_digest, source_text_digest
 from librarianlm_i18n.kernel.canonical import canonical_bytes
-from librarianlm_i18n.ports.html_document import HtmlCloneResult, HtmlMutationResult, HtmlSelectionResult, HtmlSerializationResult, ProtectedBlockResult, SelectedSourceSlot
+from librarianlm_i18n.ports.html_document import HtmlCloneResult, HtmlMutationResult, HtmlObservation, HtmlObservationResult, HtmlSelectionResult, HtmlSerializationResult, ProtectedBlockResult, SelectedSourceSlot
 
 
 class LxmlHtmlDocument:
@@ -177,6 +177,128 @@ class LxmlHtmlDocument:
             return HtmlSerializationResult(html=etree.tostring(document.root, method="html", encoding="unicode", with_tail=False))
         except Exception as error:
             return HtmlSerializationResult(error=self._assembly_error("serialize-failed", "draft", f"{type(error).__name__}: {error}", retryable=True))
+
+    def observe(self, package: CanonicalSourcePackage, html: str) -> HtmlObservationResult:
+        """Parse independently for validation and return only immutable facts."""
+        try:
+            candidate = package.model_copy(update={"source_html": html, "source_html_digest": sha256_digest(html.encode("utf-8"))})
+            selected = self.select(candidate)
+            if selected.error is not None:
+                return HtmlObservationResult(error=selected.error.model_copy(update={"workflow": "validate"}))
+            parser = etree.HTMLParser(recover=True, no_network=True, remove_comments=False, remove_pis=False)
+            root = etree.fromstring(html.encode("utf-8"), parser=parser)
+            repairs = tuple(item for item in parser.error_log if " invalid" not in item.message)
+            if root is None or repairs:
+                return HtmlObservationResult(error=self._assembly_error("malformed-candidate-html", "candidate-draft", str(repairs)))
+            owned_roots = {
+                configured.root_id: next(
+                    node for node in root.iter() if node.get("id") == configured.element_id
+                )
+                for configured in package.ownership_profile.owned_roots
+            }
+            mutable_text_nodes: set[etree._Element] = set()
+            mutable_tail_nodes: set[etree._Element] = set()
+            mutable_attributes: set[tuple[etree._Element, str]] = set()
+            for slot in selected.slots:
+                if slot.eligibility is not Eligibility.REQUIRED:
+                    continue
+                node = owned_roots[slot.location.owned_root_id]
+                for index in slot.location.path:
+                    node = list(node)[index]
+                if slot.protected_block:
+                    descendants = tuple(node.iter())
+                    mutable_text_nodes.update(descendants)
+                    mutable_tail_nodes.update(item for item in descendants if item is not node)
+                elif slot.location.slot == "text":
+                    mutable_text_nodes.add(node)
+                elif slot.location.slot.startswith("tail:"):
+                    child_index = int(slot.location.slot.split(":", 1)[1])
+                    mutable_tail_nodes.add(list(node)[child_index])
+                elif slot.location.slot.startswith("attribute:"):
+                    mutable_attributes.add((node, slot.location.slot.split(":", 1)[1]))
+
+            def tree(node: etree._Element):
+                attributes = tuple(
+                    (name, "" if (node, name) in mutable_attributes else value)
+                    for name, value in sorted(node.attrib.items())
+                    if not (str(node.tag).lower() == "html" and name in {"lang", "dir"})
+                )
+                text = "" if node in mutable_text_nodes else (node.text or "")
+                tail = "" if node in mutable_tail_nodes else (node.tail or "")
+                return (str(node.tag), attributes, text, tail, tuple(tree(child) for child in list(node)))
+            html_root = next((node for node in root.iter() if str(node.tag).lower() == "html"), root)
+            heading_levels: list[int] = []
+            landmarks: list[str] = []
+            focus_candidates: list[tuple[int, int, int, str]] = []
+            element_ids: list[str] = []
+            fragment_references: list[tuple[str, str]] = []
+            language_metadata: list[tuple[str, str | None, str | None]] = []
+
+            def collect(node: etree._Element, path: tuple[int, ...]) -> None:
+                tag = str(node.tag).lower()
+                rendered_path = "/".join(str(part) for part in path)
+                if len(tag) == 2 and tag[0] == "h" and tag[1].isdigit() and 1 <= int(tag[1]) <= 6:
+                    heading_levels.append(int(tag[1]))
+                role = node.get("role")
+                if tag in {"header", "nav", "main", "footer", "aside"} or role in {"banner", "navigation", "main", "contentinfo", "complementary"}:
+                    landmarks.append(f"{rendered_path}:{tag}:{role or ''}")
+                element_id = node.get("id")
+                if element_id is not None:
+                    element_ids.append(element_id)
+                href = node.get("href") or node.get("{http://www.w3.org/1999/xlink}href")
+                if href is not None and href.startswith("#"):
+                    fragment_references.append((rendered_path, href[1:]))
+                for attribute in ("aria-labelledby", "aria-describedby"):
+                    for target in (node.get(attribute) or "").split():
+                        fragment_references.append((f"{rendered_path}:{attribute}", target))
+                if node.get("for"):
+                    fragment_references.append((f"{rendered_path}:for", node.get("for")))
+                tabindex = node.get("tabindex")
+                try:
+                    tab_number = int(tabindex) if tabindex is not None else 0
+                except ValueError:
+                    tab_number = 0
+                native_focusable = (
+                    tag in {"button", "input", "select", "textarea", "summary", "iframe"}
+                    or (tag in {"a", "area"} and href is not None)
+                    or (tag in {"audio", "video"} and node.get("controls") is not None)
+                )
+                suppressed = (
+                    node.get("disabled") is not None or node.get("hidden") is not None
+                    or node.get("aria-hidden") == "true" or tab_number < 0
+                )
+                if not suppressed and (native_focusable or tabindex is not None):
+                    document_index = len(focus_candidates)
+                    focus_candidates.append((0 if tab_number > 0 else 1, tab_number, document_index, f"{rendered_path}:{element_id or ''}:{tabindex or ''}"))
+                if node.get("lang") is not None or node.get("dir") is not None:
+                    language_metadata.append((rendered_path, node.get("lang"), node.get("dir")))
+                for index, child in enumerate(node):
+                    collect(child, path + (index,))
+
+            collect(root, (0,))
+            focus_order = tuple(item[3] for item in sorted(focus_candidates))
+            return HtmlObservationResult(observation=HtmlObservation(
+                slots=selected.slots, structure_digest=sha256_digest(canonical_bytes(tree(root))),
+                root_language=html_root.get("lang"), root_direction=html_root.get("dir"),
+                heading_levels=tuple(heading_levels), landmarks=tuple(landmarks),
+                focus_order=focus_order, element_ids=tuple(element_ids),
+                fragment_references=tuple(fragment_references), language_metadata=tuple(language_metadata),
+            ))
+        except Exception as error:
+            return HtmlObservationResult(error=self._assembly_error("html-observation-failed", "candidate-draft", f"{type(error).__name__}: {error}", retryable=True))
+
+    def project_root_locale(self, document: object, language: str, direction: str) -> HtmlMutationResult:
+        try:
+            if not isinstance(document, _Clone):
+                return HtmlMutationResult(error=self._assembly_error("root-locale-projection-failed", "candidate-draft", "clone is not an lxml document"))
+            root = next((node for node in document.root.iter() if str(node.tag).lower() == "html"), None)
+            if root is None:
+                return HtmlMutationResult(error=self._assembly_error("root-locale-projection-failed", "candidate-draft", "HTML root is missing"))
+            root.set("lang", language)
+            root.set("dir", direction)
+            return HtmlMutationResult()
+        except Exception as error:
+            return HtmlMutationResult(error=self._assembly_error("root-locale-projection-failed", "candidate-draft", f"{type(error).__name__}: {error}", retryable=True))
 
     @staticmethod
     def _failure(code: str, subject: str, rule: str, expected: str, observed: str, *, retryable: bool = False) -> HtmlSelectionResult:

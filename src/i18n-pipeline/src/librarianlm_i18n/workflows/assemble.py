@@ -6,7 +6,7 @@ import re
 
 from librarianlm_i18n.kernel.canonical import canonical_bytes
 from librarianlm_i18n.kernel.contracts import (
-    ApplicationEvidence, AssemblyReport, AssemblyResult, CandidateDraft, CanonicalSourcePackage,
+    ApplicationEvidence, AssemblyLineage, AssemblyReport, AssemblyResult, CandidateDraft, CanonicalSourcePackage,
     ConfirmationReceipt, FixtureTargets, InlineBindingMap, PreparePackage,
     ProtectedBlockSegments, SignatureRecord, StatusValue, UnitManifest,
 )
@@ -58,6 +58,12 @@ class AssemblyWorkflow:
             cloned = self._document.clone(source)
             if cloned.error is not None:
                 raise KernelValidationError(cloned.error)
+            projected = self._document.project_root_locale(
+                cloned.document, package.validation_controls.target_locale.language,
+                package.validation_controls.target_locale.direction,
+            )
+            if projected.error is not None:
+                raise KernelValidationError(projected.error)
             applied: list[str] = []
             applied_members: list[str] = []
             map_cache: dict[str, InlineBindingMap] = {}
@@ -90,9 +96,19 @@ class AssemblyWorkflow:
             evidence = ApplicationEvidence(manifest_digest=package.manifest_digest, applied_source_unit_ids=tuple(applied), candidate_html_digest=html_digest, target_digest=sha256_digest(canonical_bytes(fixture_targets)), projection_map_digest=projection_digest, applied_member_ids=tuple(applied_members))
             draft_digest = self._put(draft)
             evidence_digest = self._put(evidence)
-            report = AssemblyReport(manifest_digest=package.manifest_digest, candidate_draft_digest=draft_digest, application_evidence_digest=evidence_digest)
-            self._put(report)
-            return AssemblyExecutionResult(value=AssemblyResult(report=report, draft=draft))
+            report = AssemblyReport(
+                manifest_digest=package.manifest_digest, candidate_draft_digest=draft_digest,
+                application_evidence_digest=evidence_digest,
+                lineage=AssemblyLineage(
+                    source_package_digest=package.source_package_digest,
+                    prepare_package_digest=package_digest,
+                    confirmation_digest=sha256_digest(canonical_bytes(confirmation)),
+                    confirmation_signature_digest=confirmation.signature_digest,
+                    component=source.converter_identity,
+                ),
+            )
+            report_digest = self._put(report)
+            return AssemblyExecutionResult(value=AssemblyResult(report=report, draft=draft, report_digest=report_digest))
         except KernelValidationError as failure:
             return AssemblyExecutionResult(error=failure.error)
         except Exception as error:

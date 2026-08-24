@@ -23,6 +23,7 @@ from .lifecycle import UnitLifecycleState
 __all__ = [
     "ArtifactReference",
     "AssemblyReport",
+    "AssemblyLineage",
     "BookFinding",
     "CompatibilityMetadata",
     "ComponentIdentity",
@@ -35,6 +36,13 @@ __all__ = [
     "Evaluation",
     "FailedUnit",
     "Finding",
+    "LocaleMetadata",
+    "ResidualLanguageControl",
+    "ResidualLanguageEvidence",
+    "TerminologyControl",
+    "ValidationControls",
+    "ValidationResult",
+    "TranslationDraft",
     "GatewayReceipt",
     "HumanEditSet",
     "InlineBindingMap",
@@ -314,6 +322,91 @@ class PreparePolicy(VersionedContract):
     accepted_segmentation_profile_id: ComponentId
     accepted_segmentation_profile_version: StrictStr = Field(min_length=1)
     allow_warnings: StrictBool = False
+    validation_controls: "ValidationControls" = Field(default_factory=lambda: ValidationControls())
+
+
+class LocaleMetadata(VersionedContract):
+    """Declared root language and writing direction; never inferred from prose."""
+
+    language: StrictStr = Field(default="en", pattern=r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$")
+    direction: Literal["ltr", "rtl"] = "ltr"
+
+    @model_validator(mode="after")
+    def language_is_canonical_and_direction_matches(self) -> "LocaleMetadata":
+        parts = self.language.split("-")
+        primary = parts[0]
+        if not (primary.isalpha() and 2 <= len(primary) <= 3 and primary == primary.lower()):
+            raise ValueError("locale language must start with a canonical lowercase ISO language subtag")
+        canonical = [primary]
+        for index, part in enumerate(parts[1:], start=1):
+            if len(part) == 4 and part.isalpha():
+                expected = part.title()
+            elif (len(part) == 2 and part.isalpha()) or (len(part) == 3 and part.isdigit()):
+                expected = part.upper()
+            elif 5 <= len(part) <= 8 and part.isalnum():
+                expected = part.lower()
+            elif len(part) == 4 and part[0].isdigit() and part.isalnum():
+                expected = part.lower()
+            else:
+                raise ValueError(f"unsupported BCP-47 subtag at position {index}")
+            if part != expected:
+                raise ValueError("locale language must use canonical BCP-47 casing")
+            canonical.append(expected)
+        rtl = primary in {"ar", "dv", "fa", "he", "ku", "ps", "sd", "ug", "ur", "yi"}
+        if self.direction != ("rtl" if rtl else "ltr"):
+            raise ValueError("locale direction must match the declared primary language")
+        return self
+
+
+class TerminologyControl(VersionedContract):
+    rule_id: StrictStr = Field(min_length=1)
+    required_unit_ids: tuple[SourceUnitId, ...] = ()
+    required_terms: tuple[StrictStr, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def terms_are_explicit(self) -> "TerminologyControl":
+        if len(set(self.required_unit_ids)) != len(self.required_unit_ids):
+            raise ValueError("terminology control unit IDs must be unique")
+        if any(not term for term in self.required_terms) or len(set(self.required_terms)) != len(self.required_terms):
+            raise ValueError("terminology controls require unique nonempty explicit terms")
+        return self
+
+
+class ResidualLanguageControl(VersionedContract):
+    detector: "ComponentIdentity | None" = None
+    tolerance: StrictInt = Field(default=0, ge=0)
+    exempt_unit_ids: tuple[SourceUnitId, ...] = ()
+
+    @model_validator(mode="after")
+    def exemptions_are_unique(self) -> "ResidualLanguageControl":
+        if len(set(self.exempt_unit_ids)) != len(self.exempt_unit_ids):
+            raise ValueError("residual language exemptions must be unique")
+        return self
+
+
+class ResidualLanguageEvidence(VersionedContract):
+    source_unit_id: SourceUnitId
+    detector: "ComponentIdentity"
+    residual_count: StrictInt = Field(ge=0)
+    matched_terms: tuple[StrictStr, ...] = ()
+    limitation: StrictStr = Field(min_length=1)
+
+
+class ValidationControls(VersionedContract):
+    """Frozen executable validation scope captured at preparation time."""
+
+    source_locale: LocaleMetadata = Field(default_factory=LocaleMetadata)
+    target_locale: LocaleMetadata = Field(default_factory=LocaleMetadata)
+    terminology: tuple[TerminologyControl, ...] = ()
+    residual_language: ResidualLanguageControl = Field(default_factory=ResidualLanguageControl)
+    accessibility_required: Literal[True] = True
+
+    @model_validator(mode="after")
+    def terminology_rules_are_unique(self) -> "ValidationControls":
+        ids = tuple(control.rule_id for control in self.terminology)
+        if len(set(ids)) != len(ids):
+            raise ValueError("validation terminology rule IDs must be unique")
+        return self
 
 
 class EditorialSheetKind(StrEnum):
@@ -356,6 +449,7 @@ class PreparePackage(VersionedContract):
     ownership_profile: OwnershipProfile
     projection_profile: ProjectionProfile
     segmentation_profile: SegmentationProfile
+    validation_controls: ValidationControls = Field(default_factory=ValidationControls)
     status: Literal["ready-for-confirmation"]
 
 
@@ -670,6 +764,9 @@ class Finding(VersionedContract):
     subject: StrictStr = Field(min_length=1)
     rule: StrictStr = Field(min_length=1)
     observed: StrictStr = Field(min_length=1)
+    expected: StrictStr = Field(default="not-applicable", min_length=1)
+    retryability: Retryability = Retryability.NOT_RETRYABLE
+    next_action: StrictStr = Field(default="Repair the declared validation input and rerun validation.", min_length=1)
 
 
 class OperationalFinding(VersionedContract):
@@ -771,6 +868,7 @@ class AssemblyReport(VersionedContract):
     findings: tuple[Finding, ...] = ()
     candidate_draft_digest: Sha256Digest | None = None
     application_evidence_digest: Sha256Digest | None = None
+    lineage: "AssemblyLineage | None" = None
 
     @model_validator(mode="after")
     def outputs_are_paired(self) -> "AssemblyReport":
@@ -793,6 +891,14 @@ class CandidateDraft(VersionedContract):
         return self
 
 
+class AssemblyLineage(VersionedContract):
+    source_package_digest: Sha256Digest
+    prepare_package_digest: Sha256Digest
+    confirmation_digest: Sha256Digest
+    confirmation_signature_digest: Sha256Digest
+    component: "ComponentIdentity"
+
+
 class ApplicationEvidence(VersionedContract):
     manifest_digest: Sha256Digest
     applied_source_unit_ids: tuple[SourceUnitId, ...]
@@ -811,12 +917,17 @@ class ApplicationEvidence(VersionedContract):
 class AssemblyResult(VersionedContract):
     report: AssemblyReport
     draft: CandidateDraft | None = None
+    report_digest: Sha256Digest | None = None
 
     @model_validator(mode="after")
     def result_matches_report(self) -> "AssemblyResult":
         published = self.report.candidate_draft_digest is not None
         if published != (self.draft is not None):
             raise ValueError("assembly result draft presence must match its report")
+        if self.report_digest is None and published:
+            # Kept optional for Story 1.4 artifact compatibility; newly emitted
+            # results always carry the persisted report reference.
+            return self
         return self
 
 
@@ -824,12 +935,97 @@ class ValidationReport(VersionedContract):
     manifest_digest: Sha256Digest
     findings: tuple[Finding, ...]
     status: StatusVector
+    source_package_digest: Sha256Digest | None = None
+    prepare_package_digest: Sha256Digest | None = None
+    assembly_report_digest: Sha256Digest | None = None
+    candidate_draft_digest: Sha256Digest | None = None
+    component: "ComponentIdentity | None" = None
+    residual_language_evidence: tuple[ResidualLanguageEvidence, ...] = ()
+    residual_exempt_unit_ids: tuple[SourceUnitId, ...] = ()
+    limitations: tuple[StrictStr, ...] = ()
+    required_unit_count: StrictInt = Field(default=0, ge=0)
+    validated_required_unit_count: StrictInt = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def machine_truth_is_canonical(self) -> "ValidationReport":
+        finding_keys = tuple((item.code, item.subject, item.rule, item.observed) for item in self.findings)
+        if finding_keys != tuple(sorted(finding_keys)) or len(set(finding_keys)) != len(finding_keys):
+            raise ValueError("validation findings must be unique and canonically ordered")
+        evidence_keys = tuple((item.source_unit_id, item.detector.implementation, item.matched_terms) for item in self.residual_language_evidence)
+        if evidence_keys != tuple(sorted(evidence_keys)) or len(set(evidence_keys)) != len(evidence_keys):
+            raise ValueError("residual-language evidence must be unique and canonically ordered")
+        if len(set(self.residual_exempt_unit_ids)) != len(self.residual_exempt_unit_ids):
+            raise ValueError("residual-language exemptions must be unique")
+        if tuple(sorted(set(self.limitations))) != self.limitations:
+            raise ValueError("validation limitations must be unique and canonically ordered")
+        if self.validated_required_unit_count > self.required_unit_count:
+            raise ValueError("validated required-unit count cannot exceed the required inventory")
+        if self.assembly_report_digest is not None:
+            blockers = any(item.severity == "blocking-error" for item in self.findings)
+            expected_compliance = StatusValue.FAILED if blockers else StatusValue.CLEAN
+            if self.status.compliance is not expected_compliance:
+                raise ValueError("validation compliance status must match blocking findings")
+            if not blockers and (
+                self.validated_required_unit_count != self.required_unit_count
+                or self.status.completeness is not StatusValue.COMPLETE
+            ):
+                raise ValueError("clean validation requires complete Required-unit coverage")
+        return self
+
+
+class TranslationDraft(VersionedContract):
+    source_package_digest: Sha256Digest
+    manifest_digest: Sha256Digest
+    candidate_draft_digest: Sha256Digest
+    validation_report_digest: Sha256Digest
+    eligible: StrictBool
+    status: StatusVector
+
+    @model_validator(mode="after")
+    def eligibility_is_honest(self) -> "TranslationDraft":
+        if not self.eligible:
+            raise ValueError("translation drafts represent eligible validation outcomes only")
+        if self.status.review is not StatusValue.NOT_STARTED or self.status.publication is not StatusValue.NOT_READY:
+            raise ValueError("eligible drafts cannot imply review or publication approval")
+        return self
+
+
+class ValidationResult(VersionedContract):
+    report: ValidationReport
+    summary: "TranslationRunSummary"
+    draft: TranslationDraft | None = None
+
+    @model_validator(mode="after")
+    def draft_matches_blockers(self) -> "ValidationResult":
+        blockers = any(finding.severity == "blocking-error" for finding in self.report.findings)
+        if blockers == (self.draft is not None):
+            raise ValueError("validation drafts are emitted only when no blockers exist")
+        if self.summary.status != self.report.status:
+            raise ValueError("validation summary and report status vectors must match")
+        if self.summary.finding_count != len(self.report.findings) or self.summary.blocker_count != sum(
+            finding.severity == "blocking-error" for finding in self.report.findings
+        ):
+            raise ValueError("validation summary finding counts must match the report")
+        if self.draft is not None and self.draft.status != self.report.status:
+            raise ValueError("eligible draft and validation report status vectors must match")
+        return self
 
 
 class TranslationRunSummary(VersionedContract):
     manifest_digest: Sha256Digest
     status: StatusVector
     report_references: tuple[ArtifactReference, ...]
+    finding_count: StrictInt = Field(default=0, ge=0)
+    blocker_count: StrictInt = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def summary_counts_and_references_are_consistent(self) -> "TranslationRunSummary":
+        if self.blocker_count > self.finding_count:
+            raise ValueError("blocking finding count cannot exceed total findings")
+        references = tuple((item.kind, item.digest) for item in self.report_references)
+        if len(set(references)) != len(references):
+            raise ValueError("run summary report references must be unique")
+        return self
 
 
 class RunComparison(VersionedContract):

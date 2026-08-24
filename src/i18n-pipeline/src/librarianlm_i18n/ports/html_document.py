@@ -71,6 +71,43 @@ class HtmlSerializationResult:
         self.error = error
 
 
+class HtmlObservation:
+    """Read-only candidate/source facts; no parsed document leaves this boundary."""
+
+    def __init__(
+        self,
+        *,
+        slots: tuple[SelectedSourceSlot, ...],
+        structure_digest: Sha256Digest,
+        root_language: str | None,
+        root_direction: str | None,
+        heading_levels: tuple[int, ...],
+        landmarks: tuple[str, ...],
+        focus_order: tuple[str, ...],
+        element_ids: tuple[str, ...],
+        fragment_references: tuple[tuple[str, str], ...],
+        language_metadata: tuple[tuple[str, str | None, str | None], ...],
+    ) -> None:
+        self.slots = slots
+        self.structure_digest = structure_digest
+        self.root_language = root_language
+        self.root_direction = root_direction
+        self.heading_levels = heading_levels
+        self.landmarks = landmarks
+        self.focus_order = focus_order
+        self.element_ids = element_ids
+        self.fragment_references = fragment_references
+        self.language_metadata = language_metadata
+
+
+class HtmlObservationResult:
+    def __init__(self, *, observation: HtmlObservation | None = None, error: ActionableError | None = None) -> None:
+        if (observation is None) == (error is None):
+            raise ValueError("HTML observation results require exactly one observation or error")
+        self.observation = observation
+        self.error = error
+
+
 class HtmlDocument(Protocol):
     def select(self, package: CanonicalSourcePackage) -> HtmlSelectionResult: ...
     def protected_block(self, package: CanonicalSourcePackage, slot: SelectedSourceSlot, source_unit_id: str) -> ProtectedBlockResult: ...
@@ -78,3 +115,5 @@ class HtmlDocument(Protocol):
     def rebind(self, document: object, unit: UnitRecord, binding_map: InlineBindingMap, target: str) -> HtmlMutationResult: ...
     def apply_plain(self, document: object, unit: UnitRecord, target: str) -> HtmlMutationResult: ...
     def serialize(self, document: object) -> HtmlSerializationResult: ...
+    def observe(self, package: CanonicalSourcePackage, html: str) -> HtmlObservationResult: ...
+    def project_root_locale(self, document: object, language: str, direction: str) -> HtmlMutationResult: ...

@@ -12,6 +12,7 @@ from librarianlm_i18n.kernel.contracts import (
     PreparationFinding, PreparationFindings, PreparationOutcome, ProjectionMap,
     ProjectionOwnership, SignatureRecord, StatusValue, StatusVector, UnitManifest,
     UnitRecord, InlineBindingMap, ProtectedBlockSegments,
+    ValidationControls,
 )
 from librarianlm_i18n.kernel.errors import ActionableError, KernelValidationError, Retryability, actionable_error
 from librarianlm_i18n.kernel.identity import derive_typed_id, is_sha256_digest, sha256_digest, source_text_digest
@@ -75,6 +76,7 @@ class PrepareWorkflow:
                 return self._blocked(run_id, findings, attempt, attempt_ceiling)
             manifest = self._persist_protected_artifacts(manifest, protected_artifacts)
             self._validate_sheet_scopes((terminology, style), manifest)
+            self._validate_control_scopes(policy.validation_controls, manifest)
             findings_object = PreparationFindings(findings=tuple(findings))
             findings_digest = self._put(findings_object)
             manifest_digest = sha256_digest(canonical_bytes(manifest))
@@ -85,6 +87,7 @@ class PrepareWorkflow:
                 findings_digest=findings_digest, ownership_profile=source_package.ownership_profile,
                 projection_profile=source_package.projection_profile,
                 segmentation_profile=source_package.segmentation_profile,
+                validation_controls=policy.validation_controls,
                 status="ready-for-confirmation",
             )
             published = self._store.publish_manifest(run_id, manifest, expected_predecessor_digest=None, attempt=attempt, attempt_ceiling=attempt_ceiling)
@@ -127,6 +130,7 @@ class PrepareWorkflow:
                 return ConfirmationResult(error=self._error("package-findings-block-signing", "prepare-package", "blocking findings present"))
             rebuilt_manifest = self._persist_protected_artifacts(rebuilt_manifest, protected_artifacts)
             self._validate_sheet_scopes((terminology, style), rebuilt_manifest)
+            self._validate_control_scopes(policy.validation_controls, rebuilt_manifest)
             rebuilt_findings = PreparationFindings(findings=tuple(findings))
             rebuilt_package = PreparePackage(
                 source_package_digest=package.source_package_digest, run_snapshot_digest=package.run_snapshot_digest,
@@ -134,6 +138,7 @@ class PrepareWorkflow:
                 terminology_sheet_digest=package.terminology_sheet_digest, style_sheet_digest=package.style_sheet_digest,
                 findings_digest=sha256_digest(canonical_bytes(rebuilt_findings)), ownership_profile=source.ownership_profile,
                 projection_profile=source.projection_profile, segmentation_profile=source.segmentation_profile,
+                validation_controls=policy.validation_controls,
                 status="ready-for-confirmation",
             )
             if canonical_bytes(rebuilt_manifest) != canonical_bytes(persisted_manifest):
@@ -301,6 +306,22 @@ class PrepareWorkflow:
             for rule in sheet.rules:
                 if not set(rule.required_unit_ids).issubset(required):
                     raise KernelValidationError(PrepareWorkflow._error("editorial-scope-invalid", "editorial-sheet", f"rule {rule.rule_id!r} names a non-required or unknown unit"))
+
+    @staticmethod
+    def _validate_control_scopes(controls: ValidationControls, manifest: UnitManifest) -> None:
+        required = {record.source_unit_id for record in manifest.units if record.eligibility is Eligibility.REQUIRED}
+        for control in controls.terminology:
+            if not control.required_unit_ids or not set(control.required_unit_ids).issubset(required):
+                raise KernelValidationError(PrepareWorkflow._error(
+                    "validation-control-scope-invalid", "validation-controls",
+                    f"terminology rule {control.rule_id!r} must name one or more Required units",
+                ))
+        exemptions = set(controls.residual_language.exempt_unit_ids)
+        if not exemptions.issubset(required):
+            raise KernelValidationError(PrepareWorkflow._error(
+                "validation-control-scope-invalid", "validation-controls",
+                "residual-language exemptions must name Required units",
+            ))
 
     def _blocked(self, run_id: str, findings: list[PreparationFinding], attempt: int, attempt_ceiling: int) -> PrepareExecutionResult:
         operational = tuple(OperationalFinding(code=finding.code, message=finding.observed) for finding in findings)

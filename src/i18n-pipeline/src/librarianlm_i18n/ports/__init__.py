@@ -9,8 +9,9 @@ from .artifact_store import (
     RecoveryResult,
     StoreResult,
 )
-from .html_document import HtmlCloneResult, HtmlDocument, HtmlMutationResult, HtmlSelectionResult, HtmlSerializationResult, ProtectedBlockResult, SelectedSourceSlot
+from .html_document import HtmlCloneResult, HtmlDocument, HtmlMutationResult, HtmlObservation, HtmlObservationResult, HtmlSelectionResult, HtmlSerializationResult, ProtectedBlockResult, SelectedSourceSlot
 from .package_signer import PackageSigner, SignatureResult, VerificationResult
+from .residual_language import ResidualLanguageDetector, ResidualLanguageResult
 
 __all__ = [
     "ArtifactStore",
@@ -23,6 +24,8 @@ __all__ = [
     "HtmlDocument",
     "HtmlCloneResult",
     "HtmlMutationResult",
+    "HtmlObservation",
+    "HtmlObservationResult",
     "HtmlSelectionResult",
     "HtmlSerializationResult",
     "ProtectedBlockResult",
@@ -30,4 +33,6 @@ __all__ = [
     "PackageSigner",
     "SignatureResult",
     "VerificationResult",
+    "ResidualLanguageDetector",
+    "ResidualLanguageResult",
 ]
